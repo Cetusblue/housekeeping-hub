@@ -187,6 +187,9 @@ def load_item_master_rows():
         ot = _normalize_flag(row[idx["OT"]])
         adhoc = _normalize_flag(row[idx["Adhoc"]])
         inventory = _normalize_flag(row[idx["Inventory"]])
+        category = _normalize_text(row[idx["Category"]]) if "Category" in idx else "Others"
+        if not category:
+            category = "Others"
 
         if not any([item_name, unit, note, display_order_raw, tue, fri, ot, adhoc, inventory]):
             continue
@@ -211,6 +214,7 @@ def load_item_master_rows():
             "OT": ot,
             "Adhoc": adhoc,
             "Inventory": inventory,
+            "category": category,
         })
 
     rows.sort(key=lambda x: x["display_order"])
@@ -225,6 +229,7 @@ def get_item_master_lookup():
         lookup[r["item_name"]] = {
             "unit": r["unit"],
             "note": r["note"],
+            "category": r.get("category", "Others"),
             "display_order": r["display_order"],
             "Tue": r["Tue"],
             "Fri": r["Fri"],

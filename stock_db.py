@@ -1,6 +1,7 @@
 from datetime import datetime
 from db import get_conn, ph
 from templates import get_template_items
+from master_loader import get_item_master_lookup
 
 
 # ---------------------------
@@ -189,18 +190,28 @@ def get_current_stock(item_name: str) -> int:
 
 def get_inventory_rows():
     """
-    Returns a list of all known items with current stock.
-    Uses all template items as the item universe for now.
+    Returns inventory-enabled items with current stock.
+    Uses Item Master Inventory = Y.
     """
-    items = _all_template_items()
+    item_lookup = get_item_master_lookup()
     rows = []
 
-    for item in items:
-        item_name = item["item_name"]
+    for item_name, info in item_lookup.items():
+        if str(info.get("Inventory", "")).upper() != "Y":
+            continue
+
         rows.append({
             "item_name": item_name,
-            "current_stock": get_current_stock(item_name)
+            "category": info.get("category", "Others"),
+            "display_order": info.get("display_order", 9999),
+            "current_stock": get_current_stock(item_name),
         })
+
+    rows.sort(key=lambda x: (
+        x.get("category", "Others"),
+        int(x.get("display_order", 9999)),
+        x.get("item_name", "")
+    ))
 
     return rows
 

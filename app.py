@@ -100,8 +100,17 @@ def format_status(status: str) -> str:
 # Login page
 # ---------------------------
 def page_login():
-    st.title("Housekeeping Hub")
-    st.caption("Login")
+    st.title("Ops Hub")
+    st.markdown(
+        "<p style='font-size:14px; color:gray;'>"
+        "Housekeeping & Linen Operations System"
+        "</p>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        "<p style='font-size:18px; font-weight:600;'>Login</p>",
+        unsafe_allow_html=True
+    )
 
     username = st.text_input("Username", placeholder="e.g. HenryC")
     pin = st.text_input("PIN / Password", type="password", placeholder="Enter password")
@@ -119,6 +128,18 @@ def page_login():
     with col2:
         if st.button("Clear", use_container_width=True):
             st.rerun()
+    
+    st.divider()
+    st.markdown("""
+    ### Announcements
+
+    13/5/2026 Update
+    - Changed Stock Monthly Report format, '0's are now blanks 
+    - Added grouped ordering layout  
+    - Added Inventory categories  
+    - Added new Tuesday items
+    - Revised app header
+    """)
 
 
 # ---------------------------
@@ -494,13 +515,16 @@ def page_order_detail():
         item_name = r["item_name"]
         unit = ""
         details = ""
+        category = "Others"
 
         if item_name in item_lookup:
             unit = item_lookup[item_name]["unit"]
             details = item_lookup[item_name]["note"]
+            category = item_lookup[item_name].get("category", "Others") or "Others"
 
         data.append({
             "line_id": r["line_id"],
+            "Category": category,
             "Item": item_name,
             "UOM": unit,
             "Details": details,
@@ -509,6 +533,8 @@ def page_order_detail():
         })
 
     data_key = f"order_detail_data_{order_id}"
+
+    data.sort(key=lambda x: (x.get("Category", "Others"), x.get("Item", "")))
 
     if data_key not in st.session_state:
         st.session_state[data_key] = data
@@ -534,23 +560,38 @@ def page_order_detail():
             st.session_state[data_key] = fulfilled_rows
             st.rerun()
 
-    edited = st.data_editor(
-        st.session_state[data_key],
-        hide_index=True,
-        disabled=disabled_cols + ["line_id"],
-        use_container_width=True,
-        column_config={
-            "line_id": None,
-            "Item": st.column_config.TextColumn("Item", disabled=True),
-            "UOM": st.column_config.TextColumn("UOM", disabled=True),
-            "Details": st.column_config.TextColumn("Details", disabled=True),
-            "Request": st.column_config.NumberColumn("Request", min_value=0, step=1),
-            "Issued": st.column_config.NumberColumn("Issued", min_value=0, step=1),
-        },
-        key=f"editor_{order_id}",
-    )
+    # Group rows by category
+    grouped = {}
+    for row in st.session_state[data_key]:
+        category = row.get("Category", "Others") or "Others"
+        grouped.setdefault(category, []).append(row)
 
-    st.session_state[data_key] = edited
+    edited_all = []
+
+    for category, rows in grouped.items():
+        st.markdown(f"### {category}")
+
+        edited_part = st.data_editor(
+            rows,
+            hide_index=True,
+            disabled=disabled_cols + ["line_id", "Category"],
+            use_container_width=True,
+            column_config={
+                "line_id": None,
+                "Category": None,
+                "Item": st.column_config.TextColumn("Item", disabled=True),
+                "UOM": st.column_config.TextColumn("UOM", disabled=True),
+                "Details": st.column_config.TextColumn("Details", disabled=True),
+                "Request": st.column_config.NumberColumn("Request", min_value=0, step=1),
+                "Issued": st.column_config.NumberColumn("Issued", min_value=0, step=1),
+            },
+            key=f"editor_{order_id}_{category}",
+        )
+
+        edited_all.extend(edited_part)
+
+    st.session_state[data_key] = edited_all
+    edited = edited_all
 
     show_save = can_edit_request or can_edit_issued
 
@@ -767,22 +808,38 @@ def page_stock_in():
     data = []
     for r in rows:
         data.append({
+            "Category": r.get("category") or r.get("Category") or "Others",
             "Item": r["item_name"],
             "Current": int(r["current_stock"]),
             "Stock In": ""
         })
 
-    edited = st.data_editor(
-        data,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "Item": st.column_config.TextColumn("Item", disabled=True),
-            "Current": st.column_config.NumberColumn("Current", disabled=True),
-            "Stock In": st.column_config.TextColumn("Stock In"),
-        },
-        key="stock_in_editor",
-    )
+    grouped = {}
+    for row in data:
+        category = row.get("Category", "Others") or "Others"
+        grouped.setdefault(category, []).append(row)
+
+    edited_all = []
+
+    for category, rows in grouped.items():
+        st.markdown(f"### {category}")
+
+        edited_part = st.data_editor(
+            rows,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Category": None,
+                "Item": st.column_config.TextColumn("Item", disabled=True),
+                "Current": st.column_config.NumberColumn("Current", disabled=True),
+                "Stock In": st.column_config.TextColumn("Stock In"),
+            },
+            key=f"stock_in_editor_{category}",
+        )
+
+        edited_all.extend(edited_part)
+
+    edited = edited_all
 
     if st.button("Stock In", use_container_width=True):
         count = 0
@@ -844,11 +901,28 @@ def page_inventory():
     data = []
     for r in rows:
         data.append({
+            "Category": r.get("category", "Others"),
             "Item": r["item_name"],
             "Current Stock": int(r["current_stock"])
         })
 
-    st.dataframe(data, use_container_width=True)
+    grouped = {}
+
+    for row in data:
+        category = row.get("Category", "Others") or "Others"
+        grouped.setdefault(category, []).append(row)
+
+    for category, rows in grouped.items():
+        st.markdown(f"### {category}")
+
+        st.dataframe(
+            rows,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Category": None,
+            },
+        )
 
     st.divider()
 
@@ -885,6 +959,11 @@ def page_monthly_report():
     if st.button("Back", use_container_width=True):
         st.session_state["page"] = "home"
         st.rerun()
+
+def blank_if_zero(value):
+    if value in (0, 0.0, "0", "0.0"):
+        return ""
+    return value
 
 def _generate_half_year_report_excel(year: int, period_code: str):
     report_data = get_half_year_report_data(year, period_code)
@@ -939,7 +1018,7 @@ def _generate_half_year_report_excel(year: int, period_code: str):
             # Month columns G:L
             monthly_qty = row["monthly_qty"]
             for i, month in enumerate(months):
-                ws.cell(row=excel_row, column=start_col + i, value=monthly_qty.get(month, 0))
+                ws.cell(row=excel_row, column=start_col + i, value=blank_if_zero(monthly_qty.get(month, 0)))
 
             excel_row += 1
 
