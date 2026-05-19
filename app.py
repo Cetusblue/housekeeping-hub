@@ -1,5 +1,6 @@
 import streamlit as st
 from datetime import date
+from orders_db import cancel_order
 
 from audit_db import (
     get_visible_locations_for_user,
@@ -95,6 +96,18 @@ def format_status(status: str) -> str:
         return "🟢 ISSUED"
     return status
 
+def can_cancel_order(user_role, username, order_creator, status):
+
+    if status != "Pending":
+        return False
+
+    if user_role in ["ADMIN", "STORE"]:
+        return True
+
+    if username == order_creator:
+        return True
+
+    return False
 
 # ---------------------------
 # Login page
@@ -132,6 +145,13 @@ def page_login():
     st.divider()
     st.markdown("""
     ### Announcements
+
+    19/5/2026 Update
+    - HOTFIX: Added order cancellation (STORE, ADMIN & order creator) 
+    - Added Pro Clean
+    - Reviewed misc items list
+    - Magic Sponge UOM is now 'Pkt'
+    - Reviewed order creation process  
 
     13/5/2026 Update
     - Changed Stock Monthly Report format, '0's are now blanks 
@@ -274,9 +294,40 @@ def page_orders_store(user):
                     key=f"store_open_{o['order_id']}",
                     use_container_width=True,
                 ):
+                    
                     st.session_state["active_order_id"] = o["order_id"]
                     st.session_state["page"] = "order_detail"
                     st.rerun()
+
+                if o["status"] == "PENDING":
+
+                    reason = st.text_input(
+                        "Cancellation Reason",
+                        key=f"store_cancel_reason_{o['order_id']}"
+                    )
+
+                    if st.button(
+                        "Cancel Order",
+                        key=f"store_cancel_{o['order_id']}",
+                        use_container_width=True
+                    ):
+
+                        if reason.strip():
+
+                            rows_updated = cancel_order(
+                                o["order_id"],
+                                user["username"],
+                                reason.strip()
+                            )
+
+                            if rows_updated > 0:
+                                st.success("Order cancelled.")
+                                st.rerun()
+                            else:
+                                st.warning("No order was cancelled. It may already be issued/cancelled, or the status did not match.")
+
+                        else:
+                            st.warning("Please enter a cancellation reason.")
 
     st.divider()
     st.subheader("Packing List Export")
@@ -358,6 +409,35 @@ def page_orders_team(user):
                     elif o["status"] in ("PARTIALLY_ISSUED", "ISSUED"):
                         st.caption("This order is no longer editable by team users.")
 
+                if can_edit:
+
+                    reason = st.text_input(
+                        "Cancellation Reason",
+                        key=f"team_cancel_reason_{o['order_id']}"
+                    )
+
+                    if st.button(
+                        "Cancel Order",
+                        key=f"team_cancel_{o['order_id']}",
+                        use_container_width=True
+                    ):
+
+                        if reason.strip():
+
+                            rows_updated = cancel_order(
+                                o["order_id"],
+                                user["username"],
+                                reason.strip()
+                            )
+
+                            if rows_updated > 0:
+                                st.success("Order cancelled.")
+                                st.rerun()
+                            else:
+                                st.warning("No order was cancelled. It may already be issued/cancelled, or the status did not match.")
+
+                        else:
+                            st.warning("Please enter a cancellation reason.")
 
     st.divider()
     st.subheader("Create / Open Order")
@@ -425,6 +505,36 @@ def page_orders_admin(user):
                     st.session_state["active_order_id"] = o["order_id"]
                     st.session_state["page"] = "order_detail"
                     st.rerun()
+
+            if o["status"] == "PENDING":
+
+                reason = st.text_input(
+                    "Cancellation Reason",
+                    key=f"admin_cancel_reason_{o['order_id']}"
+                )
+
+                if st.button(
+                    "Cancel Order",
+                    key=f"admin_cancel_{o['order_id']}",
+                    use_container_width=True
+                ):
+
+                    if reason.strip():
+
+                        rows_updated = cancel_order(
+                            o["order_id"],
+                            user["username"],
+                            reason.strip()
+                        )
+
+                        if rows_updated > 0:
+                            st.success("Order cancelled.")
+                            st.rerun()
+                        else:
+                            st.warning("No order was cancelled. It may already be issued/cancelled, or the status did not match.")
+
+                    else:
+                        st.warning("Please enter a cancellation reason.")
 
     st.divider()
     c1, c2 = st.columns(2)
@@ -506,7 +616,7 @@ def page_order_detail():
     can_edit_request = (user["role"] == "TEAM") and is_team_creator and (o["status"] == "PENDING")
 
     # STORE / ADMIN can increase issued quantities
-    can_edit_issued = user["role"] in ("STORE", "ADMIN")
+    can_edit_issued = user["role"] in ("STORE", "ADMIN") and o["status"] in ("PENDING", "PARTIALLY_ISSUED")
 
     item_lookup = get_item_master_lookup()
 

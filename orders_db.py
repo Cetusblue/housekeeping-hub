@@ -223,6 +223,29 @@ def create_order(team_code: str, template_day: str, run_date: str, created_by: s
 
     return order_id
 
+def cancel_order(order_id, cancelled_by, cancel_reason):
+    from db import get_conn
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE orders
+        SET status = 'CANCELLED',
+            cancelled_at = NOW(),
+            cancelled_by = %s,
+            cancel_reason = %s
+        WHERE order_id = %s
+          AND status = 'PENDING'
+    """, (cancelled_by, cancel_reason, order_id))
+
+    rows_updated = cur.rowcount
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return rows_updated
 
 # ---------------------------
 # Order lines
