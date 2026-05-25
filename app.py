@@ -700,7 +700,6 @@ def page_order_detail():
 
         edited_all.extend(edited_part)
 
-    st.session_state[data_key] = edited_all
     edited = edited_all
 
     show_save = can_edit_request or can_edit_issued
