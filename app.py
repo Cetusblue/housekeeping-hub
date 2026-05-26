@@ -146,6 +146,10 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    26/5/2026
+    - HOTFIX: Packing list generation date cutoff range
+    - Disappearing numbers after keying in qty for order items
+    
     19/5/2026 Update
     - HOTFIX: Added order cancellation (STORE, ADMIN & order creator) 
     - Added Pro Clean

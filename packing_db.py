@@ -1,8 +1,13 @@
 from db import get_conn, ph
 from master_loader import load_item_master_rows
 
-from datetime import datetime
+from datetime import datetime, timedelta, date
 from orders_db import update_order_lines
+
+def most_recent_sunday():
+    today = date.today()
+    days_since_sunday = (today.weekday() + 1) % 7
+    return today - timedelta(days=days_since_sunday)
 
 def get_packing_list_data(mode: str = "Tuesday"):
     """
@@ -62,10 +67,13 @@ def get_packing_list_data(mode: str = "Tuesday"):
             SUM(ol.qty_requested - ol.qty_issued) AS outstanding
         FROM order_lines ol
         JOIN orders o ON ol.order_id = o.order_id
-        WHERE o.status != 'ISSUED'
+        WHERE o.status IN ('PENDING', 'PARTIALLY_ISSUED')
+          AND o.run_date >= {ph()}
     """
 
-    params = []
+    cutoff_date = most_recent_sunday().isoformat()
+    params = [cutoff_date]
+    
     if template_days:
         query += f"\n AND o.template_day IN ({placeholders})"
         params.extend(template_days)
@@ -186,7 +194,8 @@ def get_team_item_order_lines(mode: str, team_code: str, item_name: str):
         FROM orders o
         JOIN order_lines ol
             ON o.order_id = ol.order_id
-        WHERE o.status != 'ISSUED'
+        WHERE o.status IN ('PENDING', 'PARTIALLY_ISSUED')
+          AND o.run_date >= {ph()}
           AND o.team_code = {ph()}
           AND ol.item_name = {ph()}
     """
