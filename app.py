@@ -41,8 +41,11 @@ from stock_db import (
     create_stock_in,
     get_inventory_rows,
     create_adhoc_issue_batch,
+    search_stock_movements,
+    void_stock_movement,
     get_stock_card_rows,
 )
+
 from io import BytesIO
 from openpyxl import Workbook
 from db import init_db, seed_minimal_data
@@ -146,9 +149,14 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    29/5/2026
+    - Fixed an issue where cancelled orders could only be recreated by previous creator (Thanks TEAM B1-4!)
+    - Added stock_movement void (ADMIN)
+    - Pro Clean has been added to Monthly Stock Report (BOSS, ADMIN, STORE)
+
     26/5/2026
     - HOTFIX: Packing list generation date cutoff range
-    - Disappearing numbers after keying in qty for order items
+    - Disappearing numbers after keying in qty for order items (Thanks TEAM AB2-B1!)
     
     19/5/2026 Update
     - HOTFIX: Added order cancellation (STORE, ADMIN & order creator) 
@@ -156,13 +164,6 @@ def page_login():
     - Reviewed misc items list
     - Magic Sponge UOM is now 'Pkt'
     - Reviewed order creation process  
-
-    13/5/2026 Update
-    - Changed Stock Monthly Report format, '0's are now blanks 
-    - Added grouped ordering layout  
-    - Added Inventory categories  
-    - Added new Tuesday items
-    - Revised app header
     """)
 
 
@@ -1570,6 +1571,60 @@ def page_system_tools():
         "Full database reset is still best done manually by deleting "
         "`data/housekeeping_hub.db` while the app is stopped."
     )
+
+    st.subheader("Find Stock Movement")
+
+    search_item = st.text_input("Item Name", key="movement_search_item")
+
+    date_from = st.date_input("From Date", value=None, key="movement_date_from")
+    date_to = st.date_input("To Date", value=None, key="movement_date_to")
+
+    if st.button("Search Movements", use_container_width=True):
+        results = search_stock_movements(
+            item_name=search_item,
+            date_from=date_from,
+            date_to=date_to
+        )
+
+        if not results:
+            st.info("No movements found.")
+        else:
+            st.dataframe(results, use_container_width=True)
+
+    st.divider()
+    st.subheader("Stock Movement Corrections")
+
+    movement_id = st.number_input(
+        "Movement ID",
+        min_value=1,
+        step=1,
+        key="void_movement_id"
+    )
+
+    void_reason = st.text_input(
+        "Void Reason",
+        key="void_reason"
+    )
+
+    if st.button("Void Stock Movement", use_container_width=True):
+
+        if not void_reason.strip():
+            st.warning("Please enter a void reason.")
+
+        else:
+            rows_updated = void_stock_movement(
+                int(movement_id),
+                user["username"],
+                void_reason.strip()
+            )
+
+            if rows_updated > 0:
+                st.success("Movement voided successfully.")
+                st.rerun()
+            else:
+                st.warning(
+                    "Movement not found or already voided."
+                )
 
     if st.button("Back", use_container_width=True):
         st.session_state["page"] = "home"

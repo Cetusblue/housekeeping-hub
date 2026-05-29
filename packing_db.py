@@ -73,7 +73,7 @@ def get_packing_list_data(mode: str = "Tuesday"):
 
     cutoff_date = most_recent_sunday().isoformat()
     params = [cutoff_date]
-    
+
     if template_days:
         query += f"\n AND o.template_day IN ({placeholders})"
         params.extend(template_days)
@@ -93,6 +93,7 @@ def get_packing_list_data(mode: str = "Tuesday"):
             SUM(CASE WHEN movement_type = 'IN' THEN qty ELSE 0 END) -
             SUM(CASE WHEN movement_type = 'OUT' THEN qty ELSE 0 END) AS stock
         FROM stock_movements
+        WHERE COALESCE(is_voided, FALSE) = FALSE
         GROUP BY item_name
     """)
     stock_rows = cur.fetchall()
@@ -199,7 +200,8 @@ def get_team_item_order_lines(mode: str, team_code: str, item_name: str):
           AND o.team_code = {ph()}
           AND ol.item_name = {ph()}
     """
-    params = [team_code, item_name]
+    cutoff_date = most_recent_sunday().isoformat()
+    params = [cutoff_date, team_code, item_name]
 
     if template_days:
         query += f"\n AND o.template_day IN ({placeholders})"

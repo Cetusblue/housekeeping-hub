@@ -58,7 +58,7 @@ def get_order_by_unique(team_code: str, template_day: str, run_date: str):
         SELECT order_id, team_code, template_day, run_date, status,
                created_by, created_at, issued_by, issued_at
         FROM orders
-        WHERE team_code = {ph()} AND template_day = {ph()} AND run_date = {ph()}
+        WHERE team_code = {ph()} AND template_day = {ph()} AND run_date = {ph()} AND status != 'CANCELLED'
         LIMIT 1
     """, (team_code, template_day, run_date))
 

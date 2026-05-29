@@ -177,6 +177,7 @@ def get_current_stock(item_name: str) -> int:
             COALESCE(SUM(CASE WHEN movement_type = 'OUT' THEN qty ELSE 0 END), 0) AS total_out
         FROM stock_movements
         WHERE item_name = {ph()}
+          AND COALESCE(is_voided, FALSE) = FALSE
     """
     cur.execute(query, (item_name,))
 
@@ -262,6 +263,7 @@ def get_stock_movements_for_item(item_name: str, date_from=None, date_to=None):
                source_type, source_id, created_by, created_at
         FROM stock_movements
         WHERE item_name = {ph()}
+          AND COALESCE(is_voided, FALSE) = FALSE
     """
     params = [item_name]
 
@@ -281,6 +283,73 @@ def get_stock_movements_for_item(item_name: str, date_from=None, date_to=None):
 
     return [dict(r) for r in rows]
 
+def search_stock_movements(item_name="", date_from=None, date_to=None):
+    from db import get_conn, ph
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    query = f"""
+        SELECT
+            movement_id,
+            item_name,
+            movement_type,
+            qty,
+            issued_to,
+            source_type,
+            source_id,
+            created_by,
+            created_at,
+            COALESCE(is_voided, FALSE) AS is_voided
+        FROM stock_movements
+        WHERE 1=1
+    """
+
+    params = []
+
+    if item_name.strip():
+        query += f" AND item_name ILIKE {ph()}"
+        params.append(f"%{item_name.strip()}%")
+
+    if date_from:
+        query += f" AND created_at::date >= {ph()}"
+        params.append(str(date_from))
+
+    if date_to:
+        query += f" AND created_at::date <= {ph()}"
+        params.append(str(date_to))
+
+    query += " ORDER BY created_at DESC, movement_id DESC LIMIT 100"
+
+    cur.execute(query, params)
+    rows = cur.fetchall()
+    conn.close()
+
+    return [dict(r) for r in rows]
+
+def void_stock_movement(movement_id: int, voided_by: str, void_reason: str):
+    from db import get_conn, ph
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    query = f"""
+        UPDATE stock_movements
+        SET is_voided = TRUE,
+            voided_at = CURRENT_TIMESTAMP,
+            voided_by = {ph()},
+            void_reason = {ph()}
+        WHERE movement_id = {ph()}
+          AND COALESCE(is_voided, FALSE) = FALSE
+    """
+
+    cur.execute(query, (voided_by, void_reason, movement_id))
+    rows_updated = cur.rowcount
+
+    conn.commit()
+    conn.close()
+
+    return rows_updated
 
 def get_stock_card_rows(item_name: str, date_from=None, date_to=None):
     """
