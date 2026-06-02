@@ -149,6 +149,10 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    2/6/2026
+    - Fixed report grouping and Stock Issue logic mapping
+    - Fixed Stock Card Export excel syntax issues
+
     29/5/2026
     - Fixed an issue where cancelled orders could only be recreated by previous creator (Thanks TEAM B1-4!)
     - Added stock_movement void (ADMIN)
@@ -158,12 +162,6 @@ def page_login():
     - HOTFIX: Packing list generation date cutoff range
     - Disappearing numbers after keying in qty for order items (Thanks TEAM AB2-B1!)
     
-    19/5/2026 Update
-    - HOTFIX: Added order cancellation (STORE, ADMIN & order creator) 
-    - Added Pro Clean
-    - Reviewed misc items list
-    - Magic Sponge UOM is now 'Pkt'
-    - Reviewed order creation process  
     """)
 
 
