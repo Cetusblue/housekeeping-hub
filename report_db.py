@@ -35,7 +35,7 @@ def _get_destination_group_lookup():
     """
     rows = load_destinations_rows()
     return {
-        r["destination_name"]: r["report_group"]
+        r["destination_name"].strip(): r["report_group"]
         for r in rows
         if r["active"] == "Y"
     }
@@ -104,6 +104,7 @@ def get_half_year_report_data(year: int, period_code: str):
             ON sm.source_type = 'ORDER'
            AND sm.source_id = o.order_id
         WHERE sm.movement_type = 'OUT'
+          AND COALESCE(sm.is_voided, FALSE) = FALSE
           AND EXTRACT(YEAR FROM sm.created_at::timestamp) = {ph()}
     """
     cur.execute(query, (year,))
@@ -149,8 +150,8 @@ def get_half_year_report_data(year: int, period_code: str):
             template_day = row["template_day"]
             bucket = get_order_bucket(team_code, template_day)
 
-        elif source_type == "ADHOC":
-            issued_to = row["issued_to"] or ""
+        elif source_type in ("ADHOC", "STOCK_ISSUE"):
+            issued_to = (row["issued_to"] or "").strip()
             bucket = destination_group_lookup.get(issued_to, "Others")
 
         if not bucket:

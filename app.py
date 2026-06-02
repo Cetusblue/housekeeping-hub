@@ -1150,6 +1150,21 @@ def _generate_half_year_report_excel(year: int, period_code: str):
         use_container_width=True,
     )
 
+def safe_sheet_name(name):
+    invalid_chars = ['\\', '/', '?', '*', '[', ']', ':']
+
+    safe = str(name) if name else "Item"
+
+    for ch in invalid_chars:
+        safe = safe.replace(ch, "-")
+
+    safe = safe.strip()
+
+    if not safe:
+        safe = "Item"
+
+    return safe[:31]
+
 def page_stock_card():
     require_login()
     user = st.session_state["user"]
@@ -1194,7 +1209,7 @@ def page_stock_card():
         wb.remove(default_sheet)
 
         for item_name in selections:
-            sheet_name = item_name[:31] if item_name else "Item"
+            sheet_name = safe_sheet_name(item_name)
             ws = wb.create_sheet(title=sheet_name)
 
             ws["A1"] = "Item"
@@ -1238,7 +1253,6 @@ def page_stock_card():
     if st.button("Back", use_container_width=True):
         st.session_state["page"] = "home"
         st.rerun()
-
 
 def generate_packing_list_excel(mode="TUE_COMBINED"):
     data = get_packing_list_data(mode=mode)
