@@ -46,7 +46,7 @@ def init_db_sqlite():
         username TEXT NOT NULL UNIQUE,
         display_name TEXT NOT NULL,
         password_hash TEXT NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('TEAM', 'STORE', 'ADMIN', 'BOSS')),
+        role TEXT NOT NULL CHECK(role IN ('TEAM', 'STORE', 'LINREP', 'LINTEAM', 'LINSUP', 'ADMIN', 'BOSS')),
         team_code TEXT NOT NULL,
         active TEXT NOT NULL DEFAULT 'Y' CHECK(active IN ('Y', 'N'))
     )
@@ -154,7 +154,7 @@ def init_db_postgres():
         username TEXT NOT NULL UNIQUE,
         display_name TEXT NOT NULL,
         password_hash TEXT NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('TEAM', 'STORE', 'ADMIN', 'BOSS')),
+        role TEXT NOT NULL CHECK(role IN ('TEAM', 'STORE', 'LINREP', 'LINTEAM', 'LINSUP', 'ADMIN', 'BOSS')),
         team_code TEXT NOT NULL,
         active TEXT NOT NULL DEFAULT 'Y' CHECK(active IN ('Y', 'N'))
     )
@@ -234,6 +234,73 @@ def init_db_postgres():
         area_group TEXT,
         display_order INTEGER,
         FOREIGN KEY(audit_id) REFERENCES audits(audit_id)
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS linen_cycles (
+        id SERIAL PRIMARY KEY,
+        cycle_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'DRAFT',
+        created_by TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        started_at TIMESTAMP,
+        completed_at TIMESTAMP
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS linen_cycle_reps (
+        id SERIAL PRIMARY KEY,
+        cycle_id INTEGER REFERENCES linen_cycles(id),
+        rep_username TEXT NOT NULL,
+        display_name TEXT NOT NULL
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS linen_location_assignments (
+        id SERIAL PRIMARY KEY,
+        cycle_id INTEGER REFERENCES linen_cycles(id),
+        location_id TEXT NOT NULL,
+        assigned_to TEXT NOT NULL,
+        assigned_type TEXT NOT NULL
+    )
+    """)
+
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_linen_assignments_cycle
+    ON linen_location_assignments(cycle_id)
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS linen_submissions (
+        id SERIAL PRIMARY KEY,
+        cycle_id INTEGER REFERENCES linen_cycles(id),
+        location_id TEXT NOT NULL,
+        submitted_by TEXT,
+        status TEXT DEFAULT 'PENDING',
+        submitted_at TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_linen_submissions_cycle
+    ON linen_submissions(cycle_id)
+    """)
+
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_linen_submissions_location
+    ON linen_submissions(location_id)
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS linen_submission_lines (
+        id SERIAL PRIMARY KEY,
+        submission_id INTEGER NOT NULL REFERENCES linen_submissions(id),
+        item_no TEXT NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 0
     )
     """)
 

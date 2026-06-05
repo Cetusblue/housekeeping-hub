@@ -29,7 +29,7 @@ def _normalize_flag(value):
 
 def _normalize_role(value):
     text = _normalize_text(value).upper()
-    allowed = {"TEAM", "STORE", "ADMIN", "BOSS"}
+    allowed = {"TEAM", "STORE", "LINREP", "LINTEAM", "LINSUP", "ADMIN", "BOSS"}
     if text not in allowed:
         raise ValueError(f"Invalid role in User Master: {text}")
     return text
