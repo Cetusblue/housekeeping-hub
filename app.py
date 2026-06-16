@@ -44,6 +44,8 @@ from stock_db import (
     search_stock_movements,
     void_stock_movement,
     get_stock_card_rows,
+    save_opening_balance_override,
+    update_stock_movement_date
 )
 
 from io import BytesIO
@@ -61,8 +63,16 @@ from orders_db import (
     update_order_lines,
 )
 
+from linen_db import (
+    create_linen_cycle,
+    get_linen_cycles,
+    get_linen_cycle,
+    get_cycle_reps,
+    save_cycle_reps
+)
 
-st.set_page_config(page_title="Housekeeping Hub", layout="centered")
+
+st.set_page_config(page_title="Ops Hub", layout="centered")
 
 
 # ---------------------------
@@ -149,6 +159,9 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    16/6/2026
+    - Revised Stock Card reporting and Glo Gel Audit filters
+
     2/6/2026
     - Fixed report grouping and Stock Issue logic mapping
     - Fixed Stock Card Export excel syntax issues
@@ -157,10 +170,6 @@ def page_login():
     - Fixed an issue where cancelled orders could only be recreated by previous creator (Thanks TEAM B1-4!)
     - Added stock_movement void (ADMIN)
     - Pro Clean has been added to Monthly Stock Report (BOSS, ADMIN, STORE)
-
-    26/5/2026
-    - HOTFIX: Packing list generation date cutoff range
-    - Disappearing numbers after keying in qty for order items (Thanks TEAM AB2-B1!)
     
     """)
 
@@ -224,6 +233,12 @@ def page_home():
                 st.session_state["page"] = "glo_gel_audits"
                 st.rerun()
 
+        if role in ("ADMIN", "LINSUP", "LINTEAM"):
+
+            if st.button("Linen Inventory", use_container_width=True):
+                st.session_state["page"] = "linen_inventory"
+                st.rerun()
+
         st.button("Logout", use_container_width=True, on_click=logout)
         return
 
@@ -239,7 +254,6 @@ def page_home():
 
         st.button("Logout", use_container_width=True, on_click=logout)
         return
-
 
 # ---------------------------
 # Orders page router
@@ -907,6 +921,11 @@ def page_stock_in():
 
     st.title("Stock In")
 
+    stock_in_date = st.date_input(
+        "Stock In Date",
+        value=date.today()
+    )
+
     if "flash_message" in st.session_state:
         st.success(st.session_state["flash_message"])
         del st.session_state["flash_message"]
@@ -978,7 +997,8 @@ def page_stock_in():
             create_stock_in(
                 item_name=row["Item"],
                 qty=qty,
-                created_by=user["username"]
+                created_by=user["username"],
+                created_at=str(stock_in_date)
             )
             count += 1
 
@@ -1181,8 +1201,24 @@ def page_stock_card():
 
     st.caption("Select items to include in the stock card export.")
 
-    date_from = st.date_input("Date From", value=None)
-    date_to = st.date_input("Date To", value=None)
+    selected_month = st.date_input(
+        "Stock Card Month",
+        value=date.today().replace(day=1)
+    )
+
+    date_from = selected_month.replace(day=1)
+
+    if selected_month.month == 12:
+        date_to = selected_month.replace(
+            year=selected_month.year + 1,
+            month=1,
+            day=1
+        )
+    else:
+        date_to = selected_month.replace(
+            month=selected_month.month + 1,
+            day=1
+        )
 
     selections = []
     for idx, r in enumerate(rows):
@@ -1218,11 +1254,12 @@ def page_stock_card():
             ws["C3"] = "Stock Out"
             ws["D3"] = "Balance"
             ws["E3"] = "Issued To"
+            ws["F3"] = "Remarks"
 
             stock_rows = get_stock_card_rows(
                 item_name=item_name,
-                date_from=str(date_from) if date_from else None,
-                date_to=str(date_to) if date_to else None,
+                date_from=str(date_from),
+                date_to=str(date_to),
             )
 
             excel_row = 4
@@ -1232,6 +1269,7 @@ def page_stock_card():
                 ws.cell(row=excel_row, column=3, value=row["Stock Out"])
                 ws.cell(row=excel_row, column=4, value=row["Balance"])
                 ws.cell(row=excel_row, column=5, value=row["Issued To"])
+                ws.cell(row=excel_row, column=6, value=row["Remarks"])
                 excel_row += 1
 
         output = BytesIO()
@@ -1638,6 +1676,70 @@ def page_system_tools():
                     "Movement not found or already voided."
                 )
 
+    st.divider()
+    st.subheader("Edit Monthly Opening Balance")
+
+    inventory_rows = get_inventory_rows()
+    item_options = [r["item_name"] for r in inventory_rows]
+
+    selected_item = st.selectbox(
+        "Item",
+        item_options,
+        key="opening_balance_item"
+    )
+
+    opening_month = st.date_input(
+        "Month",
+        value=date.today().replace(day=1),
+        key="opening_balance_month"
+    )
+
+    opening_balance = st.number_input(
+        "Opening Balance",
+        min_value=0,
+        step=1,
+        key="opening_balance_value"
+    )
+
+    if st.button("Save Opening Balance", use_container_width=True):
+        month_key = opening_month.strftime("%Y-%m")
+
+        save_opening_balance_override(
+            selected_item,
+            month_key,
+            int(opening_balance)
+        )
+
+        st.success("Opening balance saved.")
+
+    st.divider()
+    st.subheader("Edit Stock Movement Date")
+
+    edit_movement_id = st.number_input(
+        "Movement ID to Edit",
+        min_value=1,
+        step=1,
+        key="edit_movement_date_id"
+    )
+
+    new_movement_date = st.date_input(
+        "New Movement Date",
+        value=date.today(),
+        key="edit_movement_new_date"
+    )
+
+    if st.button("Update Movement Date", use_container_width=True):
+        rows_updated = update_stock_movement_date(
+            int(edit_movement_id),
+            str(new_movement_date)
+        )
+
+        if rows_updated > 0:
+            st.success("Movement date updated.")
+            st.rerun()
+        else:
+            st.warning("Movement not found or already voided.")
+
     if st.button("Back", use_container_width=True):
         st.session_state["page"] = "home"
         st.rerun()
@@ -1828,6 +1930,18 @@ def page_glo_gel_audits():
     user = st.session_state["user"]
 
     st.title("Glo Gel Audits")
+    
+    glo_from = st.date_input(
+        "Report From Date",
+        value=date.today().replace(day=1),
+        key="glo_report_from"
+    )
+
+    glo_to = st.date_input(
+        "Report To Date",
+        value=date.today(),
+        key="glo_report_to"
+    )
 
     # ---------------------------
     # Success message
@@ -1841,7 +1955,7 @@ def page_glo_gel_audits():
 
         if st.button("Prepare Compiled Audit Report", use_container_width=True, key="prepare_compiled_audit_report"):
             try:
-                st.session_state["compiled_audit_report"] = generate_compiled_glo_gel_report_excel()
+                st.session_state["compiled_audit_report"] = generate_compiled_glo_gel_report_excel(date_from=str(glo_from),date_to=str(glo_to))
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -2181,8 +2295,8 @@ def generate_audit_export_excel(audit_id: int):
     output.seek(0)
     return output
 
-def generate_compiled_glo_gel_report_excel():
-    grouped = get_completed_audits_grouped_by_tower()
+def generate_compiled_glo_gel_report_excel(date_from=None, date_to=None):
+    grouped = get_completed_audits_grouped_by_tower(date_from, date_to)
 
     wb = Workbook()
     default_ws = wb.active
@@ -2362,6 +2476,155 @@ def generate_compiled_glo_gel_report_excel():
     output.seek(0)
     return output
 
+def page_linen_inventory():
+    require_login()
+    user = st.session_state["user"]
+
+    role = user["role"]
+
+    st.title("Linen Inventory")
+
+    # ADMIN + LINSUP only
+    if role in ("ADMIN", "LINSUP"):
+
+        st.subheader("Create New Inventory")
+
+        cycle_name = st.text_input(
+            "Inventory Name",
+            value="Linen Inventory"
+        )
+
+        if st.button(
+            "Create Linen Inventory",
+            use_container_width=True
+        ):
+
+            if not cycle_name.strip():
+                st.warning("Please enter an inventory name.")
+
+            else:
+                create_linen_cycle(
+                    cycle_name.strip(),
+                    user["username"]
+                )
+
+                st.success("Inventory created.")
+                st.rerun()
+
+    st.divider()
+
+    st.subheader("Inventory Cycles")
+
+    cycles = get_linen_cycles()
+
+    if not cycles:
+        st.info("No linen inventory cycles found.")
+    else:
+
+        for cycle in cycles:
+            st.markdown(f"### {cycle['cycle_name']}")
+            st.write(f"Status: `{cycle['status']}`")
+            st.write(f"Created by: **{cycle['created_by']}**")
+            st.write(f"Created at: {cycle['created_at']}")
+
+            if st.button(
+                "Open",
+                key=f"open_linen_cycle_{cycle['id']}",
+                use_container_width=True
+            ):
+                st.session_state["active_linen_cycle_id"] = cycle["id"]
+                st.session_state["page"] = "linen_cycle_detail"
+                st.rerun()
+
+            st.divider()
+
+def page_linen_cycle_detail():
+    require_login()
+
+    cycle_id = st.session_state.get("active_linen_cycle_id")
+
+    if not cycle_id:
+        st.warning("No linen inventory selected.")
+        st.session_state["page"] = "linen_inventory"
+        st.rerun()
+
+    cycle = get_linen_cycle(cycle_id)
+
+    saved_reps = get_cycle_reps(cycle_id)
+    saved_rep_map = {
+        row["rep_username"]: row["display_name"]
+        for row in saved_reps
+    }
+
+    if not cycle:
+        st.error("Linen inventory not found.")
+        st.session_state["page"] = "linen_inventory"
+        st.rerun()
+
+    st.title(cycle["cycle_name"])
+    st.write(f"Status: `{cycle['status']}`")
+    st.write(f"Created by: **{cycle['created_by']}**")
+    st.write(f"Created at: {cycle['created_at']}")
+
+    st.divider()
+
+    st.subheader("Setup")
+    st.subheader("Linen Representatives")
+
+    for i in range(1, 11):
+        rep_username = f"LINREP{i}"
+        saved_name = saved_rep_map.get(rep_username, "")
+
+        if f"rep_enabled_{i}" not in st.session_state:
+            st.session_state[f"rep_enabled_{i}"] = bool(saved_name)
+
+        if f"rep_name_{i}" not in st.session_state:
+            st.session_state[f"rep_name_{i}"] = saved_name
+
+        col1, col2 = st.columns([1, 4])
+
+        with col1:
+            enabled = st.checkbox(
+                f"Linen Rep {i}",
+                key=f"rep_enabled_{i}"
+            )
+
+        with col2:
+            st.text_input(
+                "Name",
+                key=f"rep_name_{i}",
+                disabled=not enabled,
+                label_visibility="collapsed",
+                placeholder="Enter name..."
+            )
+
+    if st.button("Save Representatives", use_container_width=True):
+        rep_rows = []
+
+        for i in range(1, 11):
+            enabled = st.session_state.get(f"rep_enabled_{i}", False)
+            name = st.session_state.get(f"rep_name_{i}", "").strip()
+
+            if enabled:
+                if not name:
+                    st.warning(f"Please enter name for Linen Rep {i}.")
+                    st.stop()
+
+                rep_rows.append({
+                    "rep_username": f"LINREP{i}",
+                    "display_name": name,
+                })
+
+        save_cycle_reps(cycle_id, rep_rows)
+        st.success("Representatives saved.")
+        st.rerun()
+
+    st.divider()
+
+    if st.button("Back", use_container_width=True):
+        st.session_state["page"] = "linen_inventory"
+        st.rerun()
+
 # ---------------------------
 # Router
 # ---------------------------
@@ -2392,6 +2655,10 @@ def router():
         page_glo_gel_audits()
     elif page == "glo_gel_audit_detail":
         page_glo_gel_audit_detail()
+    elif page == "linen_inventory":
+        page_linen_inventory()
+    elif page == "linen_cycle_detail":
+        page_linen_cycle_detail()
     else:
         st.session_state["page"] = "login"
         page_login()

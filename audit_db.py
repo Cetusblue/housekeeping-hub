@@ -9,7 +9,7 @@ DB_TYPE = os.getenv("DB_TYPE", "sqlite").lower()
 def ph():
     return "%s" if DB_TYPE == "postgres" else "?"
 
-def get_completed_audits_grouped_by_tower():
+def get_completed_audits_grouped_by_tower(date_from=None, date_to=None):
     """
     Returns completed audits grouped into:
     {
@@ -26,12 +26,27 @@ def get_completed_audits_grouped_by_tower():
     conn = get_conn()
     cur = conn.cursor()
 
-    cur.execute("""
+    query = f"""
         SELECT *
         FROM audits
         WHERE status = 'COMPLETED'
+    """
+
+    params = []
+
+    if date_from:
+        query += f" AND audit_date >= {ph()}"
+        params.append(str(date_from))
+
+    if date_to:
+        query += f" AND audit_date <= {ph()}"
+        params.append(str(date_to))
+
+    query += """
         ORDER BY date(audit_date) ASC, audit_id ASC
-    """)
+    """
+
+    cur.execute(query, params)
     audit_rows = [dict(r) for r in cur.fetchall()]
 
     grouped = {"A": [], "B": [], "C": []}

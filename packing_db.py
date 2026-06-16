@@ -207,7 +207,7 @@ def get_team_item_order_lines(mode: str, team_code: str, item_name: str):
         query += f"\n AND o.template_day IN ({placeholders})"
         params.extend(template_days)
 
-    qquery += """
+    query += """
     ORDER BY o.created_at ASC, o.order_id ASC, ol.line_id ASC
     """
 

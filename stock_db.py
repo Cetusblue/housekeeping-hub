@@ -37,7 +37,7 @@ def _all_template_items():
 # ---------------------------
 # Stock movement creation
 # ---------------------------
-def create_stock_in(item_name: str, qty: int, created_by: str):
+def create_stock_in(item_name: str, qty: int, created_by: str, created_at=None):
     """
     Records a stock-in movement.
     """
@@ -64,7 +64,7 @@ def create_stock_in(item_name: str, qty: int, created_by: str):
         item_name,
         int(qty),
         created_by,
-        now_iso()
+        created_at or now_iso()
     ))
 
     conn.commit()
@@ -359,8 +359,77 @@ def get_stock_card_rows(item_name: str, date_from=None, date_to=None):
     """
     movements = get_stock_movements_for_item(item_name, date_from=date_from, date_to=date_to)
 
-    balance = 0
+    from datetime import datetime
+
+    month_key = None
+
+    if date_from:
+        month_key = str(date_from)[:7]
+    elif date_to:
+        month_key = str(date_to)[:7]
+
+    opening_balance = 0
+
+    if month_key:
+        override = get_opening_balance_override(
+            item_name,
+            month_key
+        )
+
+        if override is not None:
+            opening_balance = override
+        else:
+            conn = get_conn()
+            cur = conn.cursor()
+
+            query = f"""
+                SELECT
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN movement_type = 'IN'
+                                THEN qty
+                                ELSE -qty
+                            END
+                        ),
+                        0
+                    ) AS opening_balance
+                FROM stock_movements
+                WHERE item_name = {ph()}
+                AND COALESCE(is_voided, FALSE) = FALSE
+                AND created_at::timestamp < {ph()}::date
+            """
+
+            cur.execute(
+                query,
+                (
+                    item_name,
+                    f"{month_key}-01"
+                )
+            )
+
+            row = cur.fetchone()
+            opening_balance = int(row["opening_balance"] or 0)
+
+            conn.close()
+
+    balance = opening_balance
     rows = []
+
+    if month_key:
+        opening_date = datetime.strptime(
+            f"{month_key}-01",
+            "%Y-%m-%d"
+        )
+
+        rows.append({
+            "Date": f"{opening_date.day}-{opening_date.strftime('%b-%Y')}",
+            "Stock In": "",
+            "Stock Out": "",
+            "Balance": balance,
+            "Issued To": "",
+            "Remarks": "Opening Balance"
+        })
 
     for m in movements:
         qty_in = int(m["qty"]) if m["movement_type"] == "IN" else 0
@@ -369,12 +438,78 @@ def get_stock_card_rows(item_name: str, date_from=None, date_to=None):
         balance += qty_in
         balance -= qty_out
 
-        rows.append({
-            "Date": m["created_at"],
-            "Stock In": qty_in if qty_in > 0 else "",
-            "Stock Out": qty_out if qty_out > 0 else "",
-            "Balance": balance,
-            "Issued To": m["issued_to"] or "",
-        })
+        movement_date = datetime.strptime(
+        m["created_at"][:10],
+        "%Y-%m-%d"
+    )
+
+    rows.append({
+        "Date": f"{movement_date.day}-{movement_date.strftime('%b-%Y')}",
+        "Stock In": qty_in if qty_in > 0 else "",
+        "Stock Out": qty_out if qty_out > 0 else "",
+        "Balance": balance,
+        "Issued To": m["issued_to"] or "",
+        "Remarks": ""
+    })
 
     return rows
+
+def get_opening_balance_override(item_name: str, month_key: str):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    query = f"""
+        SELECT opening_balance
+        FROM stock_opening_balances
+        WHERE item_name = {ph()}
+          AND month_key = {ph()}
+    """
+
+    cur.execute(query, (item_name, month_key))
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return int(row["opening_balance"])
+
+
+def save_opening_balance_override(item_name: str, month_key: str, opening_balance: int):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    query = f"""
+        INSERT INTO stock_opening_balances (
+            item_name,
+            month_key,
+            opening_balance
+        )
+        VALUES ({ph()}, {ph()}, {ph()})
+        ON CONFLICT (item_name, month_key)
+        DO UPDATE SET opening_balance = EXCLUDED.opening_balance
+    """
+
+    cur.execute(query, (item_name, month_key, int(opening_balance)))
+
+    conn.commit()
+    conn.close()
+
+def update_stock_movement_date(movement_id: int, new_date: str):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    query = f"""
+        UPDATE stock_movements
+        SET created_at = {ph()}
+        WHERE movement_id = {ph()}
+          AND COALESCE(is_voided, FALSE) = FALSE
+    """
+
+    cur.execute(query, (new_date, movement_id))
+    rows_updated = cur.rowcount
+
+    conn.commit()
+    conn.close()
+
+    return rows_updated
