@@ -161,6 +161,7 @@ def page_login():
 
     16/6/2026
     - Revised Stock Card reporting and Glo Gel Audit filters
+    - Added Stock-In date selector (STORE)
 
     2/6/2026
     - Fixed report grouping and Stock Issue logic mapping
@@ -971,6 +972,12 @@ def page_stock_in():
         edited_all.extend(edited_part)
 
     edited = edited_all
+
+    stock_in_date = st.date_input(
+        "Stock In Date",
+        value=date.today(),
+        key="stock_in_date"
+    )
 
     if st.button("Stock In", use_container_width=True):
         count = 0
