@@ -1,4 +1,5 @@
 import os
+import streamlit as st
 from openpyxl import load_workbook
 from db import get_conn, ph
 
@@ -526,3 +527,79 @@ def load_audit_surfaces_rows():
         })
 
     return rows
+
+@st.cache_data
+def load_linen_locations_rows():
+    wb = _open_workbook()
+    ws = wb["Linen Location Master"]
+
+    headers = [_normalize_text(cell.value) for cell in ws[1]]
+    idx = {name: headers.index(name) for name in headers}
+
+    rows = []
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        location_id = _normalize_text(row[idx["location_id"]])
+        location_name = _normalize_text(row[idx["location_name"]])
+
+        if not location_id:
+            continue
+
+        rows.append({
+            "location_id": location_id,
+            "tower": _normalize_text(row[idx["tower"]]),
+            "level": _normalize_text(row[idx["level"]]),
+            "zone": _normalize_text(row[idx["zone"]]),
+            "location_name": location_name,
+            "lin_LINREP": _normalize_flag(row[idx["lin_LINREP"]]) if "lin_LINREP" in idx else "N",
+        })
+
+    return rows
+
+def get_linen_location_map():
+    locations = load_linen_locations_rows()
+
+    return {
+        row["location_id"]: row
+        for row in locations
+    }
+
+@st.cache_data
+def load_linen_master_rows():
+    wb = _open_workbook()
+    ws = wb["Linen Master"]
+
+    headers = [_normalize_text(cell.value) for cell in ws[1]]
+    idx = {name: headers.index(name) for name in headers}
+
+    rows = []
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        item_no = _normalize_text(row[idx["item_no"]])
+        item_name = _normalize_text(row[idx["item_name"]])
+        lin_category = _normalize_text(row[idx["lin_category"]])
+
+        if not item_no or not item_name:
+            continue
+
+        item = {
+            "item_no": item_no,
+            "item_name": item_name,
+            "lin_category": lin_category,
+        }
+
+        for h in headers:
+            if h.startswith("LOC"):
+                item[h] = _normalize_flag(row[idx[h]])
+
+        rows.append(item)
+
+    return rows
+
+def get_linen_items_for_location(location_id):
+    rows = load_linen_master_rows()
+
+    return [
+        r for r in rows
+        if r.get(location_id) == "Y"
+    ]

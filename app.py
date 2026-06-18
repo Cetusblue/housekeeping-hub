@@ -19,14 +19,20 @@ from audit_db import (
 
 from io import BytesIO
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, Border, Side
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
-from master_loader import load_destinations_rows
+from master_loader import (
+    get_item_master_lookup,
+    load_destinations_rows,
+    load_linen_locations_rows,
+    get_linen_location_map,
+    get_linen_items_for_location,
+)
+
 from admin_tools import reset_orders_only, reset_orders_and_movements
 
 from packing_db import get_packing_list_data, save_packing_board_issued
 
-from packing_db import get_packing_list_data
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
 from io import BytesIO
@@ -35,7 +41,6 @@ from datetime import datetime
 from report_db import get_half_year_report_data
 
 from report_db import get_half_year_report_data
-from master_loader import get_item_master_lookup
 
 from stock_db import (
     create_stock_in,
@@ -68,7 +73,19 @@ from linen_db import (
     get_linen_cycles,
     get_linen_cycle,
     get_cycle_reps,
-    save_cycle_reps
+    save_cycle_reps,
+    get_cycle_assignments,
+    save_cycle_assignments,
+    start_linen_cycle,
+    get_active_linen_cycle,
+    get_assignments_for_user,
+    get_submission,
+    get_submission_lines,
+    save_submission_draft,
+    submit_submission,
+    get_submission_status_map,
+    complete_linen_cycle,
+    get_submitted_location_count,
 )
 
 
@@ -162,6 +179,7 @@ def page_login():
     16/6/2026
     - Revised Stock Card reporting and Glo Gel Audit filters
     - Added Stock-In date selector (STORE)
+    - New Packing List format (STORE)
 
     2/6/2026
     - Fixed report grouping and Stock Issue logic mapping
@@ -234,11 +252,25 @@ def page_home():
                 st.session_state["page"] = "glo_gel_audits"
                 st.rerun()
 
-        if role in ("ADMIN", "LINSUP", "LINTEAM"):
+        if role == "ADMIN":
 
             if st.button("Linen Inventory", use_container_width=True):
                 st.session_state["page"] = "linen_inventory"
                 st.rerun()
+
+        st.button("Logout", use_container_width=True, on_click=logout)
+        return
+
+    # LINEN ROLES
+    if role == "LINSUP":
+        if st.button("Initiate/ Manage Linen Inventory", use_container_width=True):
+            st.session_state["page"] = "linen_manage"
+            st.rerun()
+    
+    if role in ("LINSUP", "LINTEAM", "LINREP"):
+        if st.button("Linen Inventory", use_container_width=True):
+            st.session_state["page"] = "linen_inventory"
+            st.rerun()
 
         st.button("Logout", use_container_width=True, on_click=logout)
         return
@@ -1394,6 +1426,33 @@ def generate_packing_list_excel(mode="TUE_COMBINED"):
     # -----------------------
     ws.freeze_panes = "A5"
 
+    thin = Side(style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    last_row = row_idx - 1
+    last_col = len(headers)
+
+    for row in ws.iter_rows(
+        min_row=header_row,
+        max_row=last_row,
+        min_col=1,
+        max_col=last_col
+    ):
+        for cell in row:
+            cell.border = border
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    # item name left aligned
+    for r in range(header_row + 1, last_row + 1):
+        ws.cell(row=r, column=1).alignment = Alignment(horizontal="left", vertical="center")
+
+    grey_fill = PatternFill("solid", fgColor="D9D9D9")
+
+    for col in range(3, last_col):  # team columns only, excludes Remarks
+        if col % 2 == 1:
+            for r in range(header_row, last_row + 1):
+                ws.cell(row=r, column=col).fill = grey_fill
+
     # -----------------------
     # EXPORT
     # -----------------------
@@ -2483,42 +2542,191 @@ def generate_compiled_glo_gel_report_excel(date_from=None, date_to=None):
     output.seek(0)
     return output
 
+def page_linen_manage():
+    require_login()
+    user = st.session_state["user"]
+    role = user["role"]
+
+    if role not in ("ADMIN", "LINSUP"):
+        st.error("Access denied.")
+        return
+
+    st.title("Manage Linen Inventory")
+
+    # ADMIN + LINSUP only
+    if role in ("ADMIN", "LINSUP"):
+        st.subheader("Create New Inventory")
+
+        cycle_name = st.text_input(
+            "Inventory Name",
+            value="Linen Inventory",
+            key="manage_linen_cycle_name"
+        )
+
+        if st.button(
+            "Create Linen Inventory",
+            use_container_width=True,
+            key="manage_create_linen_inventory"
+        ):
+            if not cycle_name.strip():
+                st.warning("Please enter an inventory name.")
+            else:
+                create_linen_cycle(
+                    cycle_name.strip(),
+                    user["username"]
+                )
+                st.success("Inventory created.")
+                st.rerun()
+
+    st.divider()
+    st.subheader("Inventory Cycles")
+
+    cycles = get_linen_cycles()
+
+    if not cycles:
+        st.info("No linen inventory cycles found.")
+    else:
+        for cycle in cycles:
+            st.markdown(f"### {cycle['cycle_name']}")
+            st.write(f"Status: `{cycle['status']}`")
+            st.write(f"Created by: **{cycle['created_by']}**")
+            st.write(f"Created at: {cycle['created_at']}")
+
+            if st.button(
+                "Open",
+                key=f"manage_open_linen_cycle_{cycle['id']}",
+                use_container_width=True
+            ):
+                st.session_state["active_linen_cycle_id"] = cycle["id"]
+                st.session_state["page"] = "linen_cycle_detail"
+                st.rerun()
+
+            st.divider()
+
+    if st.button("Back", use_container_width=True, key="manage_linen_back"):
+        st.session_state["page"] = "home"
+        st.rerun()
+
+
 def page_linen_inventory():
     require_login()
     user = st.session_state["user"]
 
     role = user["role"]
 
-    st.title("Linen Inventory")
+    active_cycle = get_active_linen_cycle()
 
-    # ADMIN + LINSUP only
-    if role in ("ADMIN", "LINSUP"):
+    if role.startswith("LINREP"):
 
-        st.subheader("Create New Inventory")
+        st.subheader("Active Inventory")
 
-        cycle_name = st.text_input(
-            "Inventory Name",
-            value="Linen Inventory"
+        if not active_cycle:
+            st.info("No active linen inventory.")
+            return
+
+        st.success(
+            f"Active Cycle: {active_cycle['cycle_name']}"
         )
 
-        if st.button(
-            "Create Linen Inventory",
-            use_container_width=True
-        ):
+        assignments = get_assignments_for_user(
+            active_cycle["id"],
+            user["username"]
+        )
 
-            if not cycle_name.strip():
-                st.warning("Please enter an inventory name.")
+        status_map = get_submission_status_map(active_cycle["id"])
 
-            else:
-                create_linen_cycle(
-                    cycle_name.strip(),
-                    user["username"]
+        if not assignments:
+            st.info(
+                "No locations assigned."
+            )
+            return
+
+        st.subheader("Assigned Locations")
+
+        location_map = get_linen_location_map()
+        seen_location_ids = set()
+
+        for row in assignments:
+            location_id = row["location_id"]
+
+            if location_id in seen_location_ids:
+                continue
+
+            seen_location_ids.add(location_id)
+
+            loc = location_map.get(location_id)
+
+            if not loc:
+                st.write(location_id)
+                continue
+
+            location_label = (
+                f"{loc['tower']} - {loc['level']} - "
+                f"{loc['zone']} - {loc['location_name']}"
+            )
+
+            status = status_map.get(location_id, "PENDING")
+
+            col1, col2, col3 = st.columns([4, 1, 1])
+
+            with col1:
+                st.write(location_label)
+
+            with col2:
+                st.write(status)
+
+            with col3:
+                if st.button("Open", key=f"open_linen_count_{location_id}", use_container_width=True):
+                    st.session_state["linen_count_location_id"] = location_id
+                    st.session_state["page"] = "linen_count"
+                    st.rerun()
+
+        return
+
+    if role in ("LINTEAM", "LINSUP", "ADMIN"):
+
+        st.title("Linen Inventory")
+
+        if active_cycle:
+            st.subheader("Active Inventory")
+            st.success(f"Active Cycle: {active_cycle['cycle_name']}")
+
+            locations = load_linen_locations_rows()
+            status_map = get_submission_status_map(active_cycle["id"])
+
+            st.subheader("All Locations")
+
+            for loc in locations:
+                location_id = loc["location_id"]
+
+                location_label = (
+                    f"{loc['tower']} - {loc['level']} - "
+                    f"{loc['zone']} - {loc['location_name']}"
                 )
 
-                st.success("Inventory created.")
-                st.rerun()
+                status = status_map.get(location_id, "PENDING")
 
-    st.divider()
+                col1, col2, col3 = st.columns([4, 1, 1])
+
+                with col1:
+                    st.write(location_label)
+
+                with col2:
+                    st.write(status)
+
+                with col3:
+                    if st.button(
+                        "Open",
+                        key=f"open_all_linen_count_{location_id}",
+                        use_container_width=True
+                    ):
+                        st.session_state["linen_count_location_id"] = location_id
+                        st.session_state["page"] = "linen_count"
+                        st.rerun()
+
+            return        
+
+    st.title("Linen Inventory")
 
     st.subheader("Inventory Cycles")
 
@@ -2558,6 +2766,13 @@ def page_linen_cycle_detail():
     cycle = get_linen_cycle(cycle_id)
 
     saved_reps = get_cycle_reps(cycle_id)
+
+    saved_assignments = get_cycle_assignments(cycle_id)
+
+    assigned_map = {}
+    for row in saved_assignments:
+        assigned_map.setdefault(row["assigned_to"], []).append(row["location_id"])
+
     saved_rep_map = {
         row["rep_username"]: row["display_name"]
         for row in saved_reps
@@ -2627,6 +2842,322 @@ def page_linen_cycle_detail():
         st.rerun()
 
     st.divider()
+    st.subheader("Assignment Summary")
+
+    locations = load_linen_locations_rows()
+
+    total_locations = len(locations)
+    assigned_location_ids = {
+        row["location_id"]
+        for row in saved_assignments
+    }
+
+    assigned_locations = len(assigned_location_ids)
+    remaining_locations = total_locations - assigned_locations
+
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric("Total Locations", total_locations)
+    c2.metric("Assigned", assigned_locations)
+    c3.metric("Remaining", remaining_locations)
+
+    st.divider()
+    st.subheader("Location Assignment")
+
+    active_reps = [
+        {
+            "rep_username": row["rep_username"],
+            "display_name": row["display_name"],
+        }
+        for row in saved_reps
+    ]
+
+    location_lookup = {}
+    location_options = []
+
+    for loc in locations:
+        label = f"{loc['tower']} - {loc['level']} - {loc['zone']} - {loc['location_name']}"
+        location_lookup[label] = loc["location_id"]
+        location_options.append(label)
+
+    if not active_reps:
+        st.info("Save representatives first before assigning locations.")
+    else:
+        assignment_rows = []
+
+        for rep in active_reps:
+            rep_key = rep["rep_username"]
+            saved_location_ids = assigned_map.get(rep_key, [])
+
+            default_labels = [
+                label for label, loc_id in location_lookup.items()
+                if loc_id in saved_location_ids
+            ]
+
+            selected_labels = st.multiselect(
+                f"{rep['display_name']} ({rep_key})",
+                options=location_options,
+                default=default_labels,
+                key=f"assign_locations_{rep_key}",
+            )
+
+            for label in selected_labels:
+                assignment_rows.append({
+                    "location_id": location_lookup[label],
+                    "assigned_to": rep_key,
+                    "assigned_type": "REP",
+                })
+
+        if st.button("Save Location Assignments", use_container_width=True):
+            save_cycle_assignments(cycle_id, assignment_rows)
+            st.success("Location assignments saved.")
+            st.rerun()
+
+    st.divider()
+    st.subheader("Inventory Progress")
+
+    completed_locations = get_submitted_location_count(
+        cycle_id
+    )
+
+    pending_count = (
+        total_locations
+        - completed_locations
+    )
+
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric("Total Locations", total_locations)
+    c2.metric("Completed", completed_locations)
+    c3.metric("Pending", pending_count)
+
+    if total_locations > 0:
+        progress_value = completed_locations / total_locations
+    else:
+        progress_value = 0
+
+    st.progress(progress_value)
+    st.caption(f"{completed_locations} of {total_locations} locations submitted")
+
+    status_map = get_submission_status_map(cycle_id)
+
+    st.subheader("Rep Progress")
+
+    if not saved_assignments:
+        st.info("No locations assigned to Linen Reps.")
+    else:
+        rep_name_map = {
+            row["rep_username"]: row["display_name"]
+            for row in saved_reps
+        }
+
+        rep_progress = {}
+
+        for row in saved_assignments:
+            assigned_to = row["assigned_to"]
+            location_id = row["location_id"]
+
+            rep_progress.setdefault(assigned_to, {
+                "total": 0,
+                "submitted": 0
+            })
+
+            rep_progress[assigned_to]["total"] += 1
+
+            if status_map.get(location_id) == "SUBMITTED":
+                rep_progress[assigned_to]["submitted"] += 1
+
+        for rep_username, data in rep_progress.items():
+            display_name = rep_name_map.get(rep_username, rep_username)
+
+            st.write(
+                f"**{display_name} ({rep_username})** — "
+                f"{data['submitted']} / {data['total']} submitted"
+            )
+
+    st.divider()
+    st.subheader("Start Inventory")
+
+    if cycle["status"] == "DRAFT":
+        if st.button("Start Linen Inventory", use_container_width=True):
+            start_linen_cycle(cycle_id)
+            st.success("Linen inventory started.")
+            st.rerun()
+    else:
+        st.info("This inventory has already been started.")
+
+    st.divider()
+    st.subheader("Complete Inventory")
+
+    all_locations_done = (
+        completed_locations
+        >= total_locations
+    )
+    
+    if cycle["status"] == "ACTIVE":
+
+        if not all_locations_done:
+
+            st.warning(
+                f"{pending_count} locations still require submission before inventory can be completed."
+            )
+
+        else:
+
+            st.success(
+                "All locations have been submitted."
+            )
+
+            if st.button(
+                "Complete Linen Inventory",
+                use_container_width=True
+            ):
+                complete_linen_cycle(cycle_id)
+
+                st.success(
+                    "Linen inventory completed."
+                )
+
+            st.rerun()
+
+    elif cycle["status"] == "COMPLETED":
+        st.success("This linen inventory has been completed.")
+
+    st.divider()
+
+    if st.button("Back", use_container_width=True):
+        st.session_state["page"] = "linen_manage"
+        st.rerun()
+
+def page_linen_count():
+    require_login()
+
+    user = st.session_state["user"]
+
+    location_id = st.session_state.get("linen_count_location_id")
+
+    if not location_id:
+        st.warning("No linen location selected.")
+        st.session_state["page"] = "linen_inventory"
+        st.rerun()
+
+    location_map = get_linen_location_map()
+    loc = location_map.get(location_id)
+
+    st.title("Linen Count")
+
+    if loc:
+        st.write(
+            f"**Location:** {loc['tower']} - {loc['level']} - "
+            f"{loc['zone']} - {loc['location_name']}"
+        )
+    else:
+        st.write(f"**Location:** {location_id}")
+
+    active_cycle = get_active_linen_cycle()
+
+    saved_submission = get_submission(
+        active_cycle["id"],
+        location_id
+    )
+
+    is_submitted = False
+
+    if saved_submission:
+        is_submitted = (
+            saved_submission["status"] == "SUBMITTED"
+        )
+
+    saved_qty_map = {}
+
+    if saved_submission:
+
+        saved_lines = get_submission_lines(
+            saved_submission["id"]
+        )
+
+        saved_qty_map = {
+            row["item_no"]: row["quantity"]
+            for row in saved_lines
+        }
+
+    items = get_linen_items_for_location(location_id)
+
+    if not items:
+        st.warning("No linen items configured for this location.")
+
+    else:
+
+        st.subheader("Items to Count")
+
+        count_lines = []
+
+        for item in items:
+
+            qty = st.number_input(
+                item["item_name"],
+                min_value=0,
+                step=1,
+                value=int(
+                    saved_qty_map.get(
+                        item["item_no"],
+                        0
+                    )
+                ),
+                disabled=is_submitted,
+                key=f"linen_count_{location_id}_{item['item_no']}"
+            )
+
+            count_lines.append({
+                "item_no": item["item_no"],
+                "quantity": qty
+            })
+
+    if not is_submitted:
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+
+            if st.button(
+                "Save Draft",
+                use_container_width=True,
+                key=f"save_linen_draft_{location_id}"
+            ):
+                save_submission_draft(
+                    active_cycle["id"],
+                    location_id,
+                    user["username"],
+                    count_lines
+                )
+
+                st.success("Draft saved.")
+
+        with col2:
+
+            if st.button(
+                "Submit Count",
+                use_container_width=True,
+                key=f"submit_linen_count_{location_id}"
+            ):
+
+                save_submission_draft(
+                    active_cycle["id"],
+                    location_id,
+                    user["username"],
+                    count_lines
+                )
+
+                submit_submission(
+                    active_cycle["id"],
+                    location_id,
+                    user["username"]
+                )
+
+                st.success("Count submitted.")
+                st.rerun()
+    else:
+        st.info("This count has been submitted and locked.")
 
     if st.button("Back", use_container_width=True):
         st.session_state["page"] = "linen_inventory"
@@ -2666,6 +3197,10 @@ def router():
         page_linen_inventory()
     elif page == "linen_cycle_detail":
         page_linen_cycle_detail()
+    elif page == "linen_count":
+        page_linen_count()
+    elif page == "linen_manage":
+        page_linen_manage()
     else:
         st.session_state["page"] = "login"
         page_login()
