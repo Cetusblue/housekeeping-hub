@@ -411,3 +411,50 @@ def get_submitted_location_count(cycle_id):
     conn.close()
 
     return int(row["cnt"] or 0)
+
+def get_cycle_submission_lines(cycle_id):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            s.location_id,
+            s.submitted_by,
+            s.status,
+            s.submitted_at,
+            l.item_no,
+            l.quantity
+        FROM linen_submissions s
+        JOIN linen_submission_lines l
+            ON s.id = l.submission_id
+        WHERE s.cycle_id = %s
+          AND s.status = 'SUBMITTED'
+        ORDER BY s.location_id, l.item_no
+    """, (cycle_id,))
+
+    rows = cur.fetchall()
+    conn.close()
+
+    return [dict(r) for r in rows]
+
+def force_complete_linen_cycle(cycle_id):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE linen_cycles
+        SET status = 'COMPLETED',
+            completed_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+    """, (cycle_id,))
+
+    conn.commit()
+    conn.close()
+
+def get_linen_rep_names(cycle_id):
+    rows = get_cycle_reps(cycle_id)
+
+    return {
+        row["rep_username"]: row["display_name"]
+        for row in rows
+    }

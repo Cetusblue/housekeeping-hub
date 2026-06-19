@@ -27,6 +27,7 @@ from master_loader import (
     load_linen_locations_rows,
     get_linen_location_map,
     get_linen_items_for_location,
+    load_linen_master_rows,
 )
 
 from admin_tools import reset_orders_only, reset_orders_and_movements
@@ -86,6 +87,9 @@ from linen_db import (
     get_submission_status_map,
     complete_linen_cycle,
     get_submitted_location_count,
+    get_cycle_submission_lines,
+    force_complete_linen_cycle,
+    get_linen_rep_names
 )
 
 
@@ -176,6 +180,9 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    19/6/2026
+    - Linen Inventory is now live
+
     16/6/2026
     - Revised Stock Card reporting and Glo Gel Audit filters
     - Added Stock-In date selector (STORE)
@@ -184,11 +191,6 @@ def page_login():
     2/6/2026
     - Fixed report grouping and Stock Issue logic mapping
     - Fixed Stock Card Export excel syntax issues
-
-    29/5/2026
-    - Fixed an issue where cancelled orders could only be recreated by previous creator (Thanks TEAM B1-4!)
-    - Added stock_movement void (ADMIN)
-    - Pro Clean has been added to Monthly Stock Report (BOSS, ADMIN, STORE)
     
     """)
 
@@ -200,6 +202,9 @@ def page_home():
     require_login()
     user = st.session_state["user"]
     role = user["role"]
+
+    active_linen_cycle = get_active_linen_cycle()
+    linen_active = active_linen_cycle is not None
 
     st.title("Home")
     st.write(f"Logged in as **{user['username']}** ({role})")
@@ -213,6 +218,18 @@ def page_home():
         if st.button("Glo Gel Audit", use_container_width=True):
             st.session_state["page"] = "glo_gel_audits"
             st.rerun()
+
+        if user["team_code"] in ("B1-4", "B5-10", "B11-16", "C1-12"):
+            if st.button(
+                "Linen Inventory",
+                use_container_width=True,
+                disabled=not linen_active
+            ):
+                st.session_state["page"] = "linen_inventory"
+                st.rerun()
+
+            if not linen_active:
+                st.caption("No active linen inventory session.")
 
         st.button("Logout", use_container_width=True, on_click=logout)
         return
@@ -268,12 +285,34 @@ def page_home():
             st.rerun()
     
     if role in ("LINSUP", "LINTEAM", "LINREP"):
-        if st.button("Linen Inventory", use_container_width=True):
+        if st.button(
+            "Linen Inventory",
+            use_container_width=True,
+            disabled=not linen_active
+        ):
             st.session_state["page"] = "linen_inventory"
             st.rerun()
 
+        if not linen_active:
+            st.caption("No active linen inventory session.")
+
         st.button("Logout", use_container_width=True, on_click=logout)
         return
+
+    if role == "LINREP":
+        active_cycle = get_active_linen_cycle()
+
+        if active_cycle:
+            rep_names = get_linen_rep_names(active_cycle["id"])
+
+            assigned_name = rep_names.get(
+                user["username"],
+                "Not Assigned"
+            )
+
+            st.caption(
+                f"Assigned Linen Rep: {assigned_name}"
+            )
 
     # BOSS
     if role == "BOSS":
@@ -1806,6 +1845,36 @@ def page_system_tools():
         else:
             st.warning("Movement not found or already voided.")
 
+    st.divider()
+    st.subheader("Linen UAT Tools")
+
+    linen_cycles = get_linen_cycles()
+
+    if not linen_cycles:
+        st.info("No linen inventory cycles found.")
+    else:
+        cycle_options = {
+            f"{c['id']} - {c['cycle_name']} ({c['status']})": c["id"]
+            for c in linen_cycles
+        }
+
+        selected_cycle_label = st.selectbox(
+            "Linen Cycle",
+            list(cycle_options.keys()),
+            key="uat_linen_cycle_select"
+        )
+
+        if st.button(
+            "Force Complete Linen Inventory",
+            use_container_width=True
+        ):
+            force_complete_linen_cycle(
+                cycle_options[selected_cycle_label]
+            )
+
+            st.success("Linen inventory force-completed for UAT.")
+            st.rerun()
+
     if st.button("Back", use_container_width=True):
         st.session_state["page"] = "home"
         st.rerun()
@@ -2683,6 +2752,78 @@ def page_linen_inventory():
 
         return
 
+    if role == "TEAM":
+
+        active_cycle = get_active_linen_cycle()
+
+        if not active_cycle:
+            st.info("No active linen inventory.")
+            return
+
+        location_rows = load_linen_locations_rows()
+
+        group_column_map = {
+            "B1-4": "lin_B1-4",
+            "B5-10": "lin_B5-10",
+            "B11-16": "lin_B11-16",
+            "C1-12": "lin_C1-12",
+        }
+
+        access_column = group_column_map.get(
+            user["group"]
+        )
+
+        allowed_locations = [
+            row
+            for row in location_rows
+            if str(
+                row.get(access_column, "")
+            ).strip().upper() == "Y"
+        ]
+
+        st.title("Linen Inventory")
+
+        st.subheader("Active Inventory")
+        st.success(f"Active Cycle: {active_cycle['cycle_name']}")
+
+        status_map = get_submission_status_map(active_cycle["id"])
+
+        st.subheader("Assigned Locations")
+
+        if not allowed_locations:
+            st.info("No linen locations assigned to your team.")
+            return
+
+        for loc in allowed_locations:
+            location_id = loc["location_id"]
+
+            location_label = (
+                f"{loc['tower']} - {loc['level']} - "
+                f"{loc['zone']} - {loc['location_name']}"
+            )
+
+            status = status_map.get(location_id, "PENDING")
+
+            col1, col2, col3 = st.columns([4, 1, 1])
+
+            with col1:
+                st.write(location_label)
+
+            with col2:
+                st.write(status)
+
+            with col3:
+                if st.button(
+                    "Open",
+                    key=f"open_team_linen_count_{location_id}",
+                    use_container_width=True
+                ):
+                    st.session_state["linen_count_location_id"] = location_id
+                    st.session_state["page"] = "linen_count"
+                    st.rerun()
+
+        return
+
     if role in ("LINTEAM", "LINSUP", "ADMIN"):
 
         st.title("Linen Inventory")
@@ -3024,6 +3165,23 @@ def page_linen_cycle_detail():
         st.success("This linen inventory has been completed.")
 
     st.divider()
+    st.subheader("Report Data Test")
+
+    if cycle["status"] == "COMPLETED":
+        st.divider()
+        st.subheader("Linen Report Export")
+
+        report_file = generate_linen_report_excel(cycle_id)
+
+        st.download_button(
+            label="Download Linen Inventory Report",
+            data=report_file,
+            file_name=f"linen_inventory_{cycle_id}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+
+    st.divider()
 
     if st.button("Back", use_container_width=True):
         st.session_state["page"] = "linen_manage"
@@ -3092,6 +3250,11 @@ def page_linen_count():
 
         count_lines = []
 
+        can_edit = (
+            not is_submitted
+            or user["role"] in ("LINTEAM", "LINSUP", "ADMIN")
+        )
+
         for item in items:
 
             qty = st.number_input(
@@ -3104,7 +3267,7 @@ def page_linen_count():
                         0
                     )
                 ),
-                disabled=is_submitted,
+                disabled=not can_edit,
                 key=f"linen_count_{location_id}_{item['item_no']}"
             )
 
@@ -3113,7 +3276,7 @@ def page_linen_count():
                 "quantity": qty
             })
 
-    if not is_submitted:
+    if can_edit:
 
         col1, col2 = st.columns(2)
 
@@ -3162,6 +3325,275 @@ def page_linen_count():
     if st.button("Back", use_container_width=True):
         st.session_state["page"] = "linen_inventory"
         st.rerun()
+
+def generate_linen_report_excel(cycle_id):
+    report_rows = get_cycle_submission_lines(cycle_id)
+
+    location_map = get_linen_location_map()
+    linen_items = get_linen_items_for_location  # not used here
+
+    # Build item lookup from Linen Master
+    from master_loader import load_linen_master_rows
+    item_rows = load_linen_master_rows()
+
+    item_order = []
+    item_map = {}
+
+    for row in item_rows:
+        item_no = str(row["item_no"])
+
+        item_order.append(item_no)
+
+        item_map[item_no] = {
+            "item_name": row["item_name"],
+            "lin_category": row.get("lin_category", "")
+        }
+
+    qty_map = {}
+
+    for row in report_rows:
+
+        location_id = row["location_id"]
+        item_no = str(row["item_no"])
+
+        qty_map[(location_id, item_no)] = row["quantity"]
+
+    item_map = {
+        str(row["item_no"]): row
+        for row in item_rows
+    }
+
+    wb = Workbook()
+    summary_ws = wb.active
+    summary_ws.title = "Summary"
+
+    cycle = get_linen_cycle(cycle_id)
+
+    summary_ws["A1"] = "Linen Inventory Report"
+    summary_ws["A2"] = f"Inventory: {cycle['cycle_name']}"
+    summary_ws["A3"] = f"Status: {cycle['status']}"
+    summary_ws["A4"] = f"Generated: {datetime.now().strftime('%d-%b-%Y %H:%M')}"
+
+    summary_ws["A1"].font = Font(size=14, bold=True)
+    summary_ws["A2"].font = Font(bold=True)
+    summary_ws["A3"].font = Font(bold=True)
+    summary_ws["A4"].font = Font(bold=True)
+
+    def write_location_matrix_sheet(sheet_name, location_filter):
+        ws = wb.create_sheet(title=sheet_name)
+
+        selected_locations = [
+            loc
+            for loc in location_map.values()
+            if location_filter(loc)
+        ]
+
+        selected_locations.sort(
+            key=lambda x: (
+                x.get("tower", ""),
+                x.get("level", ""),
+                x.get("zone", ""),
+                x.get("location_name", "")
+            )
+        )
+
+        # headers
+        ws.cell(1, 1, "Item No")
+        ws.cell(1, 2, "Item Name")
+
+        for col_idx, loc in enumerate(selected_locations, start=3):
+            ws.cell(1, col_idx, loc.get("level", ""))
+            ws.cell(2, col_idx, loc.get("zone", ""))
+            ws.cell(3, col_idx, loc.get("location_name", ""))
+
+        # item rows
+        row_num = 4
+
+        for item_no in item_order:
+            ws.cell(row_num, 1, item_no)
+            ws.cell(row_num, 2, item_map[item_no]["item_name"])
+
+            for col_idx, loc in enumerate(selected_locations, start=3):
+                location_id = loc["location_id"]
+
+                qty = qty_map.get(
+                    (location_id, item_no),
+                    0
+                )
+
+                ws.cell(
+                    row_num,
+                    col_idx,
+                    qty if qty > 0 else ""
+                )
+
+            row_num += 1
+
+        ws.freeze_panes = "C4"
+
+        ws.column_dimensions["A"].width = 10
+        ws.column_dimensions["B"].width = 35
+
+        for col_idx in range(3, 3 + len(selected_locations)):
+            ws.column_dimensions[ws.cell(1, col_idx).column_letter].width = 8
+
+    write_location_matrix_sheet(
+        "Tower A",
+        lambda loc: loc.get("tower") == "A"
+    )
+
+    headers = [
+        "Item No",
+        "Item Name",
+        "New Stock",
+        "Laundry Partner",
+        "All Locations",
+        "Condemn",
+        "Grand Total"
+    ]
+
+    header_row = 6
+
+    for col, header in enumerate(headers, start=1):
+        summary_ws.cell(header_row, col, header)
+        summary_ws.cell(header_row, col).font = Font(bold=True)
+
+    NEW_STOCK_LOCS = {"LOC1600", "LOC1610"}
+
+    LAUNDRY_PARTNER_LOCS = {"LOC1570"}
+
+    CONDEMN_LOCS = {"LOC1560"}
+
+    row_num = header_row + 1
+
+    for item_no in item_order:
+
+        item_name = item_map[item_no]["item_name"]
+
+        new_stock = 0
+        laundry_partner = 0
+        condemn = 0
+        all_locations = 0
+
+        for (location_id, current_item_no), qty in qty_map.items():
+
+            if current_item_no != item_no:
+                continue
+
+            if location_id in NEW_STOCK_LOCS:
+                new_stock += qty
+
+            elif location_id in LAUNDRY_PARTNER_LOCS:
+                laundry_partner += qty
+
+            elif location_id in CONDEMN_LOCS:
+                condemn += qty
+
+            else:
+                all_locations += qty
+
+        grand_total = (
+            new_stock
+            + laundry_partner
+            + condemn
+            + all_locations
+        )
+        
+        summary_ws.cell(row_num, 1, item_no)
+        summary_ws.cell(row_num, 2, item_name)
+
+        summary_ws.cell(
+            row_num, 3,
+            new_stock if new_stock > 0 else ""
+        )
+
+        summary_ws.cell(
+            row_num, 4,
+            laundry_partner if laundry_partner > 0 else ""
+        )
+
+        summary_ws.cell(
+            row_num, 5,
+            all_locations if all_locations > 0 else ""
+        )
+
+        summary_ws.cell(
+            row_num, 6,
+            condemn if condemn > 0 else ""
+        )
+
+        summary_ws.cell(
+            row_num, 7,
+            grand_total if grand_total > 0 else ""
+        )
+
+        row_num += 1
+
+    TOWER_B_EXCLUDE = {
+        "LOC1550", "LOC1560", "LOC1570", "LOC1600", "LOC1620"
+    }
+
+    TOWER_C_EXCLUDE = {
+        "LOC1610",
+        "LOC1630", "LOC1640", "LOC1650", "LOC1660",
+        "LOC1670", "LOC1680", "LOC1690", "LOC1700"
+    }
+
+    TROLLEY_LOCS = {
+        "LOC1620",
+        "LOC1630", "LOC1640", "LOC1650", "LOC1660",
+        "LOC1670", "LOC1680", "LOC1690", "LOC1700"
+    }
+
+    write_location_matrix_sheet(
+        "Tower B",
+        lambda loc:
+            loc.get("tower") == "B"
+            and loc["location_id"] not in TOWER_B_EXCLUDE
+    )
+
+    write_location_matrix_sheet(
+        "Tower C",
+        lambda loc:
+            loc.get("tower") == "C"
+            and loc["location_id"] not in TOWER_C_EXCLUDE
+    )
+
+    write_location_matrix_sheet(
+    "Tower C Item With Trolley",
+        lambda loc:
+            loc["location_id"] in TROLLEY_LOCS
+    )
+
+    write_location_matrix_sheet(
+        "Linen Room",
+        lambda loc:
+            loc["location_id"] == "LOC1550"
+    )
+
+    write_location_matrix_sheet(
+        "New Item",
+        lambda loc:
+            loc["location_id"] in {"LOC1600", "LOC1610"}
+    )
+
+    write_location_matrix_sheet(
+        "Condemn",
+        lambda loc:
+            loc["location_id"] == "LOC1560"
+    )
+
+    write_location_matrix_sheet(
+        "Laundry Partner",
+        lambda loc:
+            loc["location_id"] == "LOC1570"
+    )
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return output
 
 # ---------------------------
 # Router
