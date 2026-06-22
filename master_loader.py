@@ -542,16 +542,31 @@ def load_linen_locations_rows():
         location_id = _normalize_text(row[idx["location_id"]])
         location_name = _normalize_text(row[idx["location_name"]])
 
+        tower = _normalize_text(row[idx["tower"]])
+        level = _normalize_text(row[idx["level"]])
+        zone = _normalize_text(row[idx["zone"]])
+
+        lin_linrep = _normalize_text(row[idx["lin_LINREP"]]) if "lin_LINREP" in idx else ""
+
+        lin_b1_4 = _normalize_text(row[idx["lin_B1-4"]]) if "lin_B1-4" in idx else ""
+        lin_b5_10 = _normalize_text(row[idx["lin_B5-10"]]) if "lin_B5-10" in idx else ""
+        lin_b11_16 = _normalize_text(row[idx["lin_B11-16"]]) if "lin_B11-16" in idx else ""
+        lin_c1_12 = _normalize_text(row[idx["lin_C1-12"]]) if "lin_C1-12" in idx else ""
+
         if not location_id:
             continue
 
         rows.append({
             "location_id": location_id,
-            "tower": _normalize_text(row[idx["tower"]]),
-            "level": _normalize_text(row[idx["level"]]),
-            "zone": _normalize_text(row[idx["zone"]]),
+            "tower": tower,
+            "level": level,
+            "zone": zone,
             "location_name": location_name,
-            "lin_LINREP": _normalize_flag(row[idx["lin_LINREP"]]) if "lin_LINREP" in idx else "N",
+            "lin_LINREP": lin_linrep,
+            "lin_B1-4": lin_b1_4,
+            "lin_B5-10": lin_b5_10,
+            "lin_B11-16": lin_b11_16,
+            "lin_C1-12": lin_c1_12,
         })
 
     return rows

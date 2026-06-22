@@ -130,6 +130,15 @@ def format_status(status: str) -> str:
         return "🟢 ISSUED"
     return status
 
+def linen_status_label(status):
+    if status == "SUBMITTED":
+        return "🟢 SUBMITTED"
+
+    if status == "DRAFT":
+        return "🟡 DRAFT"
+
+    return "🔴 PENDING"
+
 def can_cancel_order(user_role, username, order_creator, status):
 
     if status != "Pending":
@@ -180,6 +189,11 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    22/6/2026
+    - Addition of new accounts for Linen Team
+    - UI improvements for Linen Inventory (LINSUP, LINTEAM, LINREP)     
+    - Bug fixes for Housekeeping Team's Linen Inventory       
+
     19/6/2026
     - Linen Inventory is now live
 
@@ -187,10 +201,6 @@ def page_login():
     - Revised Stock Card reporting and Glo Gel Audit filters
     - Added Stock-In date selector (STORE)
     - New Packing List format (STORE)
-
-    2/6/2026
-    - Fixed report grouping and Stock Issue logic mapping
-    - Fixed Stock Card Export excel syntax issues
     
     """)
 
@@ -275,6 +285,10 @@ def page_home():
                 st.session_state["page"] = "linen_inventory"
                 st.rerun()
 
+            if st.button("Initiate/ Manage Linen Inventory", use_container_width=True):
+                st.session_state["page"] = "linen_manage"
+                st.rerun()
+
         st.button("Logout", use_container_width=True, on_click=logout)
         return
 
@@ -283,21 +297,6 @@ def page_home():
         if st.button("Initiate/ Manage Linen Inventory", use_container_width=True):
             st.session_state["page"] = "linen_manage"
             st.rerun()
-    
-    if role in ("LINSUP", "LINTEAM", "LINREP"):
-        if st.button(
-            "Linen Inventory",
-            use_container_width=True,
-            disabled=not linen_active
-        ):
-            st.session_state["page"] = "linen_inventory"
-            st.rerun()
-
-        if not linen_active:
-            st.caption("No active linen inventory session.")
-
-        st.button("Logout", use_container_width=True, on_click=logout)
-        return
 
     if role == "LINREP":
         active_cycle = get_active_linen_cycle()
@@ -313,6 +312,21 @@ def page_home():
             st.caption(
                 f"Assigned Linen Rep: {assigned_name}"
             )
+
+    if role in ("LINSUP", "LINTEAM", "LINREP"):
+        if st.button(
+            "Linen Inventory",
+            use_container_width=True,
+            disabled=not linen_active
+        ):
+            st.session_state["page"] = "linen_inventory"
+            st.rerun()
+
+        if not linen_active:
+            st.caption("No active linen inventory session.")
+
+        st.button("Logout", use_container_width=True, on_click=logout)
+        return
 
     # BOSS
     if role == "BOSS":
@@ -2708,6 +2722,12 @@ def page_linen_inventory():
             st.info(
                 "No locations assigned."
             )
+            st.divider()
+
+            if st.button("Back", use_container_width=True, key="linen_inventory_back_rep_empty"):
+                st.session_state["page"] = "home"
+                st.rerun()
+
             return
 
         st.subheader("Assigned Locations")
@@ -2742,13 +2762,19 @@ def page_linen_inventory():
                 st.write(location_label)
 
             with col2:
-                st.write(status)
+                st.write(linen_status_label(status))
 
             with col3:
                 if st.button("Open", key=f"open_linen_count_{location_id}", use_container_width=True):
                     st.session_state["linen_count_location_id"] = location_id
                     st.session_state["page"] = "linen_count"
                     st.rerun()
+
+        st.divider()
+
+        if st.button("Back", use_container_width=True, key="linen_inventory_back_rep"):
+            st.session_state["page"] = "home"
+            st.rerun()
 
         return
 
@@ -2769,9 +2795,19 @@ def page_linen_inventory():
             "C1-12": "lin_C1-12",
         }
 
-        access_column = group_column_map.get(
-            user["group"]
-        )
+        team_group = user.get("group") or user.get("team_code")
+        access_column = group_column_map.get(team_group)
+
+
+        count = 0
+
+        for row in location_rows:
+            if str(row.get("lin_B5-10", "")).strip().upper() == "Y":
+                count += 1
+
+        if not access_column:
+            st.warning("No linen access group configured for this account.")
+            return
 
         allowed_locations = [
             row
@@ -2810,7 +2846,7 @@ def page_linen_inventory():
                 st.write(location_label)
 
             with col2:
-                st.write(status)
+                st.write(linen_status_label(status))
 
             with col3:
                 if st.button(
@@ -2821,6 +2857,12 @@ def page_linen_inventory():
                     st.session_state["linen_count_location_id"] = location_id
                     st.session_state["page"] = "linen_count"
                     st.rerun()
+
+        st.divider()
+
+        if st.button("Back", use_container_width=True, key="linen_inventory_back_team"):
+            st.session_state["page"] = "home"
+            st.rerun()
 
         return
 
@@ -2853,7 +2895,7 @@ def page_linen_inventory():
                     st.write(location_label)
 
                 with col2:
-                    st.write(status)
+                    st.write(linen_status_label(status))
 
                 with col3:
                     if st.button(
@@ -2864,8 +2906,14 @@ def page_linen_inventory():
                         st.session_state["linen_count_location_id"] = location_id
                         st.session_state["page"] = "linen_count"
                         st.rerun()
+      
+        st.divider()
 
-            return        
+        if st.button("Back", use_container_width=True, key="linen_inventory_back_all"):
+            st.session_state["page"] = "home"
+            st.rerun()
+
+        return
 
     st.title("Linen Inventory")
 
@@ -3074,11 +3122,19 @@ def page_linen_cycle_detail():
 
     if total_locations > 0:
         progress_value = completed_locations / total_locations
+        if completed_locations >= total_locations:
+            progress_icon = "🟢"
+        elif completed_locations > 0:
+            progress_icon = "🟡"
+        else:
+            progress_icon = "🔴"
     else:
         progress_value = 0
 
     st.progress(progress_value)
-    st.caption(f"{completed_locations} of {total_locations} locations submitted")
+    st.caption(
+        f"{progress_icon} {completed_locations} of {total_locations} locations submitted"
+    )
 
     status_map = get_submission_status_map(cycle_id)
 
