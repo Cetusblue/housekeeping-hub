@@ -820,8 +820,21 @@ def page_order_detail():
                 if not orig:
                     continue
 
+                item_name = orig["item_name"]
+
                 req = int(row["Request"])
                 iss = int(row["Issued"])
+
+                if item_name == "Red Linen Bag 24 x 39":
+                    if req > 0 and req % 5 != 0:
+                        rounded_req = ((req + 4) // 5) * 5
+
+                        st.warning(
+                            f"Red Linen Bag 24 x 39 is issued in bundles of 5. "
+                            f"Request quantity adjusted from {req} to {rounded_req}."
+                        )
+
+                        req = rounded_req
 
                 if not can_edit_request:
                     req = int(orig["qty_requested"] or 0)
@@ -944,58 +957,64 @@ def page_issue_stock():
         key="issue_stock_editor",
     )
 
+    issue_date = st.date_input(
+        "Issue Date",
+        value=date.today(),
+        key="issue_stock_date"
+    )
+
     if st.button("Issue", use_container_width=True):
         if not final_destination:
             st.warning("Please select or specify a destination.")
             return
 
-    if st.button("Back", use_container_width=True):
-        st.session_state["page"] = "home"
-        st.rerun()
+        issue_rows = []
+        count = 0
 
-    issue_rows = []
-    count = 0
+        for row in edited:
+            raw_qty = str(row["Issue Qty"]).strip()
 
-    for row in edited:
-        raw_qty = str(row["Issue Qty"]).strip()
+            if raw_qty == "":
+                continue
 
-        if raw_qty == "":
-            continue
+            try:
+                qty = int(raw_qty.replace(",", ""))
+            except Exception:
+                st.error(f"Invalid Issue Qty for item: {row['Item']}")
+                return
+
+            if qty < 0:
+                st.error(f"Negative Issue Qty is not allowed for item: {row['Item']}")
+                return
+
+            if qty > 0:
+                issue_rows.append({
+                    "item_name": row["Item"],
+                "   qty": qty,
+                })
+                count += 1
+
+        if count == 0:
+            st.warning("No quantities entered.")
+            return
 
         try:
-            qty = int(raw_qty.replace(",", ""))
-        except Exception:
-            st.error(f"Invalid Issue Qty for item: {row['Item']}")
-            return
-
-        if qty < 0:
-            st.error(f"Negative Issue Qty is not allowed for item: {row['Item']}")
-            return
-
-        if qty > 0:
-            issue_rows.append({
-                "item_name": row["Item"],
-                "qty": qty,
-            })
-            count += 1
-
-    if count == 0:
-        st.warning("No quantities entered.")
-        return
-
-    try:
-        create_adhoc_issue_batch(
-            issue_rows=issue_rows,
-            issued_to=final_destination,
-            created_by=user["username"],
-        )
-        st.session_state["flash_message"] = f"Stock issued for {count} item(s) to {final_destination}."
-        st.rerun()
-    except ValueError as e:
-        st.error(str(e))
+            create_adhoc_issue_batch(
+                issue_rows=issue_rows,
+                issued_to=final_destination,
+                created_by=user["username"],
+                created_at=str(issue_date)
+            )
+            st.session_state["flash_message"] = f"Stock issued for {count} item(s) to {final_destination}."
+            st.rerun()
+        except ValueError as e:
+            st.error(str(e))
 
     st.divider()
 
+    if st.button("Back", use_container_width=True):
+        st.session_state["page"] = "home"
+        st.rerun()
 
 def page_stock_in():
     require_login()

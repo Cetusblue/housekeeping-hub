@@ -71,7 +71,7 @@ def create_stock_in(item_name: str, qty: int, created_by: str, created_at=None):
     conn.close()
 
 
-def create_adhoc_issue(item_name: str, qty: int, issued_to: str, created_by: str):
+def create_adhoc_issue(item_name: str, qty: int, issued_to: str, created_by: str, created_at=None):
     """
     Records an adhoc stock-out movement.
     Enforces no negative stock.
@@ -106,7 +106,7 @@ def create_adhoc_issue(item_name: str, qty: int, issued_to: str, created_by: str
         int(qty),
         issued_to,
         created_by,
-        now_iso()
+        created_at or now_iso()
     ))
 
     conn.commit()
