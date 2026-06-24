@@ -113,7 +113,7 @@ def create_adhoc_issue(item_name: str, qty: int, issued_to: str, created_by: str
     conn.close()
 
 
-def create_adhoc_issue_batch(issue_rows: list[dict], issued_to: str, created_by: str):
+def create_adhoc_issue_batch(issue_rows: list[dict], issued_to: str, created_by: str, created_at=None):
     """
     Creates a batch of adhoc issue movements.
     Strict mode:
@@ -153,7 +153,7 @@ def create_adhoc_issue_batch(issue_rows: list[dict], issued_to: str, created_by:
             qty,
             issued_to,
             created_by,
-            now_iso()
+            created_at or now_iso()
         ))
 
     conn.commit()

@@ -189,6 +189,13 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    24/6/2026
+    - Performance enhacement for Stock In   
+    - Date selector for Stock Out
+    - Minor bug fixes for stock movement  
+    - Spill Pad has been added to Tuesday order form
+    - Red Linen Bag 24 x 39 can only be ordered in multiples of 5    
+
     22/6/2026
     - Addition of new accounts for Linen Team
     - UI improvements for Linen Inventory (LINSUP, LINTEAM, LINREP)     
@@ -197,11 +204,6 @@ def page_login():
     19/6/2026
     - Linen Inventory is now live
 
-    16/6/2026
-    - Revised Stock Card reporting and Glo Gel Audit filters
-    - Added Stock-In date selector (STORE)
-    - New Packing List format (STORE)
-    
     """)
 
 
@@ -990,7 +992,7 @@ def page_issue_stock():
             if qty > 0:
                 issue_rows.append({
                     "item_name": row["Item"],
-                "   qty": qty,
+                "qty": qty,
                 })
                 count += 1
 
