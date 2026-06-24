@@ -443,14 +443,14 @@ def get_stock_card_rows(item_name: str, date_from=None, date_to=None):
         "%Y-%m-%d"
     )
 
-    rows.append({
-        "Date": f"{movement_date.day}-{movement_date.strftime('%b-%Y')}",
-        "Stock In": qty_in if qty_in > 0 else "",
-        "Stock Out": qty_out if qty_out > 0 else "",
-        "Balance": balance,
-        "Issued To": m["issued_to"] or "",
-        "Remarks": ""
-    })
+        rows.append({
+            "Date": f"{movement_date.day}-{movement_date.strftime('%b-%Y')}",
+            "Stock In": qty_in if qty_in > 0 else "",
+            "Stock Out": qty_out if qty_out > 0 else "",
+            "Balance": balance,
+            "Issued To": m["issued_to"] or "",
+            "Remarks": ""
+        })
 
     return rows
 
