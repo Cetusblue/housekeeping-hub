@@ -189,6 +189,11 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    1/7/2026
+    - Added new locations for Linen Inventory
+    - Increased item font size for Linen Inventory
+    - Linen Inventory Report modified to show new locations
+
     24/6/2026
     - Performance enhacement for Stock In   
     - Date selector for Stock Out
@@ -3279,6 +3284,15 @@ def page_linen_count():
     location_map = get_linen_location_map()
     loc = location_map.get(location_id)
 
+    st.markdown("""
+    <style>
+    div[data-testid="stNumberInput"] label p {
+        font-size: 1.4rem;
+        font-weight: 600;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     st.title("Linen Count")
 
     if loc:
@@ -3409,6 +3423,25 @@ def generate_linen_report_excel(cycle_id):
     location_map = get_linen_location_map()
     linen_items = get_linen_items_for_location  # not used here
 
+    def loc_text(loc, key):
+        return str(loc.get(key, "")).strip().upper()
+
+    def location_report_type(location_id):
+        loc = location_map.get(location_id, {})
+        zone = loc_text(loc, "zone")
+        name = loc_text(loc, "location_name")
+
+        if zone == "NEW ITEM":
+            return "NEW_STOCK"
+
+        if name == "LAUNDRY PARTNER":
+            return "LAUNDRY_PARTNER"
+
+        if "CONDEMN" in name:
+            return "CONDEMN"
+
+        return "ALL_LOCATIONS"
+
     # Build item lookup from Linen Master
     from master_loader import load_linen_master_rows
     item_rows = load_linen_master_rows()
@@ -3535,11 +3568,9 @@ def generate_linen_report_excel(cycle_id):
         summary_ws.cell(header_row, col, header)
         summary_ws.cell(header_row, col).font = Font(bold=True)
 
-    NEW_STOCK_LOCS = {"LOC1600", "LOC1610"}
-
-    LAUNDRY_PARTNER_LOCS = {"LOC1570"}
-
-    CONDEMN_LOCS = {"LOC1560"}
+    def get_location_zone(location_id):
+        loc = location_map.get(location_id, {})
+        return str(loc.get("zone", "")).strip()
 
     row_num = header_row + 1
 
@@ -3557,13 +3588,18 @@ def generate_linen_report_excel(cycle_id):
             if current_item_no != item_no:
                 continue
 
-            if location_id in NEW_STOCK_LOCS:
+            loc = location_map.get(location_id, {})
+
+            zone = str(loc.get("zone", "")).strip()
+            location_name = str(loc.get("location_name", "")).strip().upper()
+
+            if zone == "New Item":
                 new_stock += qty
 
-            elif location_id in LAUNDRY_PARTNER_LOCS:
+            elif location_name == "LAUNDRY PARTNER":
                 laundry_partner += qty
 
-            elif location_id in CONDEMN_LOCS:
+            elif "CONDEMN" in location_name:
                 condemn += qty
 
             else:
@@ -3606,66 +3642,59 @@ def generate_linen_report_excel(cycle_id):
 
         row_num += 1
 
-    TOWER_B_EXCLUDE = {
-        "LOC1550", "LOC1560", "LOC1570", "LOC1600", "LOC1620"
-    }
-
-    TOWER_C_EXCLUDE = {
-        "LOC1610",
-        "LOC1630", "LOC1640", "LOC1650", "LOC1660",
-        "LOC1670", "LOC1680", "LOC1690", "LOC1700"
-    }
-
-    TROLLEY_LOCS = {
-        "LOC1620",
-        "LOC1630", "LOC1640", "LOC1650", "LOC1660",
-        "LOC1670", "LOC1680", "LOC1690", "LOC1700"
+    SPECIAL_ZONES = {
+        "Linen Hub",
+        "Condemned Linen",
+        "Laundry Partner",
+        "New Item",
+        "Item With Trolley",
     }
 
     write_location_matrix_sheet(
         "Tower B",
         lambda loc:
             loc.get("tower") == "B"
-            and loc["location_id"] not in TOWER_B_EXCLUDE
+            and loc.get("zone") not in SPECIAL_ZONES
     )
 
     write_location_matrix_sheet(
         "Tower C",
         lambda loc:
             loc.get("tower") == "C"
-            and loc["location_id"] not in TOWER_C_EXCLUDE
+            and loc.get("zone") not in SPECIAL_ZONES
     )
 
     write_location_matrix_sheet(
-    "Tower C Item With Trolley",
+        "Tower C Item With Trolley",
         lambda loc:
-            loc["location_id"] in TROLLEY_LOCS
+            loc.get("zone") == "Item With Trolley"
     )
 
     write_location_matrix_sheet(
         "Linen Room",
         lambda loc:
-            loc["location_id"] == "LOC1550"
+            loc.get("zone") == "Linen Hub"
+            and loc.get("location_name") not in ("Condemned Linen", "Laundry Partner")
     )
 
     write_location_matrix_sheet(
         "New Item",
         lambda loc:
-            loc["location_id"] in {"LOC1600", "LOC1610"}
+            loc.get("zone") == "New Item"
     )
 
     write_location_matrix_sheet(
         "Condemn",
         lambda loc:
-            loc["location_id"] == "LOC1560"
+            "CONDEMN" in str(loc.get("location_name", "")).upper()
     )
 
     write_location_matrix_sheet(
         "Laundry Partner",
         lambda loc:
-            loc["location_id"] == "LOC1570"
+            str(loc.get("location_name", "")).strip().upper() == "LAUNDRY PARTNER"
     )
-
+    
     output = BytesIO()
     wb.save(output)
     output.seek(0)
