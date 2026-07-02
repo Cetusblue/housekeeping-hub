@@ -272,7 +272,7 @@ def get_stock_movements_for_item(item_name: str, date_from=None, date_to=None):
         params.append(date_from)
 
     if date_to:
-        query += f" AND created_at::timestamp < ({ph()}::date + INTERVAL '1 day')"
+        query += f" AND created_at::timestamp < {ph()}::date"
         params.append(date_to)
 
     query += " ORDER BY created_at ASC, movement_id ASC"

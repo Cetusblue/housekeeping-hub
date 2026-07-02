@@ -1338,6 +1338,20 @@ def page_stock_card():
             day=1
         )
 
+    c1, c2 = st.columns(2)
+
+    with c1:
+        if st.button("Select All Items", use_container_width=True):
+            for idx in range(len(rows)):
+                st.session_state[f"stock_card_item_{idx}"] = True
+            st.rerun()
+
+    with c2:
+        if st.button("Clear All Items", use_container_width=True):
+            for idx in range(len(rows)):
+                st.session_state[f"stock_card_item_{idx}"] = False
+            st.rerun()
+
     selections = []
     for idx, r in enumerate(rows):
         col1, col2, col3 = st.columns([1, 6, 2])
