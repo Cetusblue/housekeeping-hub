@@ -189,6 +189,15 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    6/7/2026
+    - Stock Report: Removed GM Towel & Amendments to item names
+    - Added 7 Linen Rep accounts
+    - Added 1 new location for Linen Inventory
+
+    2/7/2026
+    - Added "Select All" and "Clear All" options for Stock Card Report
+    - Revised Stock Card Report date range            
+
     1/7/2026
     - Added new locations for Linen Inventory
     - Increased item font size for Linen Inventory
@@ -200,14 +209,6 @@ def page_login():
     - Minor bug fixes for stock movement  
     - Spill Pad has been added to Tuesday order form
     - Red Linen Bag 24 x 39 can only be ordered in multiples of 5    
-
-    22/6/2026
-    - Addition of new accounts for Linen Team
-    - UI improvements for Linen Inventory (LINSUP, LINTEAM, LINREP)     
-    - Bug fixes for Housekeeping Team's Linen Inventory       
-
-    19/6/2026
-    - Linen Inventory is now live
 
     """)
 
