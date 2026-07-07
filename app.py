@@ -189,6 +189,10 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    7/72026
+    - Added more safeguard measures to prevent duplicate entries for Linen Inventory
+    - Assigned locations to LINREPs now will no longer reappear
+
     6/7/2026
     - Stock Report: Removed GM Towel & Amendments to item names
     - Added 7 Linen Rep accounts
@@ -3023,7 +3027,7 @@ def page_linen_cycle_detail():
     st.subheader("Setup")
     st.subheader("Linen Representatives")
 
-    for i in range(1, 11):
+    for i in range(1, 18):
         rep_username = f"LINREP{i}"
         saved_name = saved_rep_map.get(rep_username, "")
 
@@ -3102,10 +3106,26 @@ def page_linen_cycle_detail():
         for row in saved_reps
     ]
 
+    TEAM_ACCESS_COLS = [
+        "lin_B1-4",
+        "lin_B5-10",
+        "lin_B11-16",
+        "lin_C1-12",
+    ]
+
+    def is_team_exclusive_location(loc):
+        return any(
+            str(loc.get(col, "")).strip().upper() == "Y"
+            for col in TEAM_ACCESS_COLS
+        )
+
     location_lookup = {}
     location_options = []
 
     for loc in locations:
+        if is_team_exclusive_location(loc):
+            continue
+
         label = f"{loc['tower']} - {loc['level']} - {loc['zone']} - {loc['location_name']}"
         location_lookup[label] = loc["location_id"]
         location_options.append(label)
@@ -3124,9 +3144,22 @@ def page_linen_cycle_detail():
                 if loc_id in saved_location_ids
             ]
 
+            assigned_to_other_reps = {
+                loc_id
+                for assigned_to, loc_ids in assigned_map.items()
+                if assigned_to != rep_key
+                for loc_id in loc_ids
+            }
+
+            available_options = [
+                label
+                for label, loc_id in location_lookup.items()
+                if loc_id not in assigned_to_other_reps
+            ]
+
             selected_labels = st.multiselect(
                 f"{rep['display_name']} ({rep_key})",
-                options=location_options,
+                options=available_options,
                 default=default_labels,
                 key=f"assign_locations_{rep_key}",
             )
@@ -3409,6 +3442,19 @@ def page_linen_count():
                 use_container_width=True,
                 key=f"submit_linen_count_{location_id}"
             ):
+
+                latest_submission = get_submission(
+                    active_cycle["id"],
+                    location_id
+                )
+
+                if (
+                    latest_submission
+                    and latest_submission["status"] == "SUBMITTED"
+                    and user["role"] not in ("LINTEAM", "LINSUP", "ADMIN")
+                ):
+                    st.warning("This location has already been submitted by another user.")
+                    st.stop()
 
                 save_submission_draft(
                     active_cycle["id"],
