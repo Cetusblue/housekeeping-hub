@@ -3057,7 +3057,7 @@ def page_linen_cycle_detail():
     if st.button("Save Representatives", use_container_width=True):
         rep_rows = []
 
-        for i in range(1, 11):
+        for i in range(1, 18):
             enabled = st.session_state.get(f"rep_enabled_{i}", False)
             name = st.session_state.get(f"rep_name_{i}", "").strip()
 

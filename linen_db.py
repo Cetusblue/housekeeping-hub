@@ -78,7 +78,7 @@ def get_cycle_reps(cycle_id):
         SELECT *
         FROM linen_cycle_reps
         WHERE cycle_id = %s
-        ORDER BY rep_username
+        ORDER BY CAST(REPLACE(rep_username, 'LINREP', '') AS INTEGER)
     """, (cycle_id,))
 
     rows = cur.fetchall()
