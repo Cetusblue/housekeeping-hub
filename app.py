@@ -190,8 +190,9 @@ def page_login():
     ### Announcements
 
     7/72026
-    - Added more safeguard measures to prevent duplicate entries for Linen Inventory
+    - Added more safeguard measures to prevent duplicate entries for Linen Inventory (TEAM)
     - Assigned locations to LINREPs now will no longer reappear
+    - Removed inactive locations for Linen Inventory
 
     6/7/2026
     - Stock Report: Removed GM Towel & Amendments to item names
