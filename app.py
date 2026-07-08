@@ -208,13 +208,6 @@ def page_login():
     - Increased item font size for Linen Inventory
     - Linen Inventory Report modified to show new locations
 
-    24/6/2026
-    - Performance enhacement for Stock In   
-    - Date selector for Stock Out
-    - Minor bug fixes for stock movement  
-    - Spill Pad has been added to Tuesday order form
-    - Red Linen Bag 24 x 39 can only be ordered in multiples of 5    
-
     """)
 
 
