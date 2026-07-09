@@ -189,6 +189,9 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    9/7/2026
+    - Revised linen item at various locations
+
     7/72026
     - Added more safeguard measures to prevent duplicate entries for Linen Inventory (TEAM)
     - Assigned locations to LINREPs now will no longer reappear
@@ -202,11 +205,6 @@ def page_login():
     2/7/2026
     - Added "Select All" and "Clear All" options for Stock Card Report
     - Revised Stock Card Report date range            
-
-    1/7/2026
-    - Added new locations for Linen Inventory
-    - Increased item font size for Linen Inventory
-    - Linen Inventory Report modified to show new locations
 
     """)
 
