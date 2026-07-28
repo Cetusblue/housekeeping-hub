@@ -192,11 +192,31 @@ def get_current_stock(item_name: str) -> int:
 def get_inventory_rows():
     """
     Returns inventory-enabled items with current stock.
-    Uses Item Master Inventory = Y.
+
+    Stock balances are loaded in one grouped query instead of opening a new
+    database connection for every Item Master row.
     """
     item_lookup = get_item_master_lookup()
-    rows = []
 
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT
+            item_name,
+            COALESCE(SUM(CASE WHEN movement_type = 'IN' THEN qty ELSE -qty END), 0) AS current_stock
+        FROM stock_movements
+        WHERE COALESCE(is_voided, FALSE) = FALSE
+        GROUP BY item_name
+    """)
+    stock_rows = cur.fetchall()
+    conn.close()
+
+    stock_lookup = {
+        r["item_name"]: int(r["current_stock"] or 0)
+        for r in stock_rows
+    }
+
+    rows = []
     for item_name, info in item_lookup.items():
         if str(info.get("Inventory", "")).upper() != "Y":
             continue
@@ -205,7 +225,7 @@ def get_inventory_rows():
             "item_name": item_name,
             "category": info.get("category", "Others"),
             "display_order": info.get("display_order", 9999),
-            "current_stock": get_current_stock(item_name),
+            "current_stock": stock_lookup.get(item_name, 0),
         })
 
     rows.sort(key=lambda x: (
@@ -247,6 +267,40 @@ def validate_issue_quantities(issue_rows: list[dict]):
 
     return (len(errors) == 0, errors)
 
+
+
+def get_recent_adhoc_issues(limit: int = 10):
+    """
+    Returns the most recent non-voided Issue Stock movement rows.
+
+    Each item issued is one history entry. Results are newest first.
+    """
+    safe_limit = max(1, min(int(limit), 100))
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    query = f"""
+        SELECT
+            movement_id,
+            item_name,
+            qty,
+            issued_to,
+            created_by,
+            created_at
+        FROM stock_movements
+        WHERE movement_type = 'OUT'
+          AND source_type = 'ADHOC'
+          AND COALESCE(is_voided, FALSE) = FALSE
+        ORDER BY created_at DESC, movement_id DESC
+        LIMIT {ph()}
+    """
+
+    cur.execute(query, (safe_limit,))
+    rows = cur.fetchall()
+    conn.close()
+
+    return [dict(r) for r in rows]
 
 # ---------------------------
 # Movement history

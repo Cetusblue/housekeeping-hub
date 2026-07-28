@@ -1,6 +1,6 @@
 import streamlit as st
 from datetime import date
-from orders_db import cancel_order
+from orders_db import cancel_order, close_order
 
 from audit_db import (
     get_visible_locations_for_user,
@@ -28,6 +28,8 @@ from master_loader import (
     get_linen_location_map,
     get_linen_items_for_location,
     load_linen_master_rows,
+    load_report_line_master_rows,
+    load_report_mapping_rows,
 )
 
 from admin_tools import reset_orders_only, reset_orders_and_movements
@@ -47,6 +49,7 @@ from stock_db import (
     create_stock_in,
     get_inventory_rows,
     create_adhoc_issue_batch,
+    get_recent_adhoc_issues,
     search_stock_movements,
     void_stock_movement,
     get_stock_card_rows,
@@ -57,7 +60,12 @@ from stock_db import (
 from io import BytesIO
 from openpyxl import Workbook
 from db import init_db, seed_minimal_data
-from auth import authenticate
+from auth import (
+    authenticate,
+    create_persistent_session,
+    authenticate_persistent_session,
+    revoke_persistent_session,
+)
 from run_dates import compute_run_date
 from orders_db import (
     list_orders_for_store,
@@ -99,15 +107,49 @@ st.set_page_config(page_title="Ops Hub", layout="centered")
 # ---------------------------
 # App bootstrap
 # ---------------------------
+@st.cache_resource(show_spinner=False)
 def ensure_bootstrap():
+    # Database schema and workbook user sync only need to run once per app process,
+    # not on every Streamlit widget rerun.
     init_db()
     seed_minimal_data()
+    return True
 
 
 # ---------------------------
 # Session helpers
 # ---------------------------
+def _get_login_token():
+    token = st.query_params.get("auth_token", "")
+    if isinstance(token, list):
+        token = token[0] if token else ""
+    return str(token or "")
+
+
+def restore_persistent_login():
+    if st.session_state.get("user"):
+        return
+
+    token = _get_login_token()
+    if not token:
+        return
+
+    user = authenticate_persistent_session(token)
+    if user:
+        st.session_state["user"] = user
+        st.session_state["page"] = "home"
+    else:
+        # Expired, revoked, or invalid token. Remove it from the URL.
+        if "auth_token" in st.query_params:
+            del st.query_params["auth_token"]
+
+
 def logout():
+    token = _get_login_token()
+    if token:
+        revoke_persistent_session(token)
+    if "auth_token" in st.query_params:
+        del st.query_params["auth_token"]
     st.session_state.pop("user", None)
     st.session_state["page"] = "login"
 
@@ -128,6 +170,10 @@ def format_status(status: str) -> str:
         return "🟠 PARTIALLY ISSUED"
     if status == "ISSUED":
         return "🟢 ISSUED"
+    if status == "CLOSED":
+        return "🟢✱ CLOSED"
+    if status == "CANCELLED":
+        return "⚫ CANCELLED"
     return status
 
 def linen_status_label(status):
@@ -170,6 +216,11 @@ def page_login():
 
     username = st.text_input("Username", placeholder="e.g. HenryC")
     pin = st.text_input("PIN / Password", type="password", placeholder="Enter password")
+    remember_login = st.checkbox(
+        "Keep me logged in on this device",
+        value=True,
+        help="Keeps this browser signed in for up to 30 days unless you log out."
+    )
 
     col1, col2 = st.columns(2)
     with col1:
@@ -178,6 +229,13 @@ def page_login():
             if user:
                 st.session_state["user"] = user
                 st.session_state["page"] = "home"
+
+                if remember_login:
+                    token = create_persistent_session(user["user_id"], days_valid=30)
+                    st.query_params["auth_token"] = token
+                elif "auth_token" in st.query_params:
+                    del st.query_params["auth_token"]
+
                 st.rerun()
             else:
                 st.error("Invalid username or password.")
@@ -189,22 +247,40 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    28/7/2026 *MAJOR UPDATE*
+    Order Management:
+    - Added Close Order function for partially fulfilled orders. (STORE)
+    - Orders that cannot be completed due to reasons such as insufficient stock can now be properly closed instead of remaining partially issued.
+    - Closure reason is recorded for future referencing and reporting where necessary.
+
+    Order History:
+    - TEAM & STORE users now view current month + previous month orders by default, making the order list cleaner and easier to navigate.
+    - ADMIN will still view the full order history.
+
+    Stock Card:
+    - Improved worksheet organization.
+    - Report-related items are now grouped more logically.
+    - Report-tabs are highlighted for easier identifcation.
+
+    Login Experience:
+    - Added "Keep me logged in" option.
+    - Users can remain signed in on their own devices, reducing the need to log in repeatedly after refreshing the browser or reconnecting.
+
+    Issue Stock:
+    - Added Issue History.
+    - The Issue Stock page now displays the 10 most recent stock issuances, allowing STORE personnel to review stock issuance without generating a report (or calling me 😂)
+
+    Performance Improvements:
+    - Optimized database performance for faster page loading and smoother navigation.
+    - Reduced loading times across various modules, particularly during inventory and stock operations.
+
     9/7/2026
     - Revised linen item at various locations
 
     7/7/2026
     - Added more safeguard measures to prevent duplicate entries for Linen Inventory (TEAM)
     - Assigned locations to LINREPs now will no longer reappear
-    - Removed inactive locations for Linen Inventory
-
-    6/7/2026
-    - Stock Report: Removed GM Towel & Amendments to item names
-    - Added 7 Linen Rep accounts
-    - Added 1 new location for Linen Inventory
-
-    2/7/2026
-    - Added "Select All" and "Clear All" options for Stock Card Report
-    - Revised Stock Card Report date range            
+    - Removed inactive locations for Linen Inventory        
 
     """)
 
@@ -374,16 +450,16 @@ def page_orders():
 # Orders page: STORE
 # ---------------------------
 def page_orders_store(user):
-    st.caption("Storeman view: pending orders first.")
+    st.caption("Storeman view: current and previous month, with pending orders first.")
 
     status_filter = st.selectbox(
         "Filter",
-        ["PENDING", "PARTIALLY_ISSUED", "ISSUED", "ALL"],
+        ["PENDING", "PARTIALLY_ISSUED", "ISSUED", "CLOSED", "ALL"],
         index=0,
     )
     status = None if status_filter == "ALL" else status_filter
 
-    orders = list_orders_for_store(status=status)
+    orders = list_orders_for_store(status=status, recent_only=True)
 
     if not orders:
         st.info("No orders found.")
@@ -395,6 +471,10 @@ def page_orders_store(user):
                 st.write(f"Submitted: **{o['created_at']}**")
                 if o.get("issued_at"):
                     st.write(f"Last issued: **{o['issued_at']}** by **{o.get('issued_by', '-') }**")
+
+                if o.get("closed_at"):
+                    st.write(f"Closed: **{o['closed_at']}** by **{o.get('closed_by', '-')}**")
+                    st.write(f"Reason: **{o.get('closed_reason', '-')}**")
 
                 if st.button(
                     "Open Order",
@@ -435,6 +515,33 @@ def page_orders_store(user):
 
                         else:
                             st.warning("Please enter a cancellation reason.")
+
+                if o["status"] == "PARTIALLY_ISSUED":
+                    close_reason = st.text_input(
+                        "Closure Reason",
+                        value="No stock",
+                        key=f"store_close_reason_{o['order_id']}"
+                    )
+
+                    if st.button(
+                        "Close Order",
+                        key=f"store_close_{o['order_id']}",
+                        use_container_width=True
+                    ):
+                        try:
+                            rows_updated = close_order(
+                                o["order_id"],
+                                user["username"],
+                                close_reason
+                            )
+
+                            if rows_updated > 0:
+                                st.success("Order closed. Outstanding quantities were left unissued.")
+                                st.rerun()
+                            else:
+                                st.warning("The order was not closed. Its status may have changed.")
+                        except ValueError as e:
+                            st.warning(str(e))
 
     st.divider()
     st.subheader("Packing List Export")
@@ -480,7 +587,7 @@ def page_orders_store(user):
 # Orders page: TEAM
 # ---------------------------
 def page_orders_team(user):
-    st.caption("Team view: one order per issue date. Only creator can edit pending.")
+    st.caption("Team view: current and previous month. Only the creator can edit pending orders.")
 
     orders = list_orders_for_team(user["team_code"])
 
@@ -496,6 +603,10 @@ def page_orders_team(user):
 
                 if o.get("issued_at"):
                     st.write(f"Last issued: **{o['issued_at']}** by **{o.get('issued_by', '-') }**")
+
+                if o.get("closed_at"):
+                    st.write(f"Closed: **{o['closed_at']}** by **{o.get('closed_by', '-')}**")
+                    st.write(f"Reason: **{o.get('closed_reason', '-')}**")
 
                 is_creator = (o["created_by"] == user["username"])
                 can_edit = (o["status"] == "PENDING") and is_creator
@@ -513,7 +624,7 @@ def page_orders_team(user):
                 with c2:
                     if not is_creator and o["status"] == "PENDING":
                         st.caption("Edit locked: only the creator can edit this pending order.")
-                    elif o["status"] in ("PARTIALLY_ISSUED", "ISSUED"):
+                    elif o["status"] in ("PARTIALLY_ISSUED", "ISSUED", "CLOSED"):
                         st.caption("This order is no longer editable by team users.")
 
                 if can_edit:
@@ -595,7 +706,7 @@ def page_orders_team(user):
 def page_orders_admin(user):
     st.caption("Admin view: browse all orders.")
 
-    orders = list_orders_for_store(status=None)
+    orders = list_orders_for_store(status=None, recent_only=False)
 
     if not orders:
         st.info("No orders found.")
@@ -612,6 +723,36 @@ def page_orders_admin(user):
                     st.session_state["active_order_id"] = o["order_id"]
                     st.session_state["page"] = "order_detail"
                     st.rerun()
+
+                if o.get("closed_at"):
+                    st.write(f"Closed: **{o['closed_at']}** by **{o.get('closed_by', '-')}**")
+                    st.write(f"Reason: **{o.get('closed_reason', '-')}**")
+
+                if o["status"] == "PARTIALLY_ISSUED":
+                    close_reason = st.text_input(
+                        "Closure Reason",
+                        value="No stock",
+                        key=f"admin_close_reason_{o['order_id']}"
+                    )
+
+                    if st.button(
+                        "Close Order",
+                        key=f"admin_close_{o['order_id']}",
+                        use_container_width=True
+                    ):
+                        try:
+                            rows_updated = close_order(
+                                o["order_id"],
+                                user["username"],
+                                close_reason
+                            )
+                            if rows_updated > 0:
+                                st.success("Order closed. Outstanding quantities were left unissued.")
+                                st.rerun()
+                            else:
+                                st.warning("The order was not closed. Its status may have changed.")
+                        except ValueError as e:
+                            st.warning(str(e))
 
             if o["status"] == "PENDING":
 
@@ -718,6 +859,12 @@ def page_order_detail():
         f"{o['team_code']} | {o['template_day']} | Issue {o['run_date']} | "
         f"Status: {format_status(o['status'])} | Created by {o['created_by']}"
     )
+
+    if o.get("closed_at"):
+        st.info(
+            f"Closed by {o.get('closed_by', '-')} on {o['closed_at']}. "
+            f"Reason: {o.get('closed_reason', '-')}"
+        )
 
     is_team_creator = (user["role"] == "TEAM") and (o["created_by"] == user["username"])
     can_edit_request = (user["role"] == "TEAM") and is_team_creator and (o["status"] == "PENDING")
@@ -883,7 +1030,9 @@ def page_order_detail():
 
     st.divider()
 
-    if o["status"] == "ISSUED":
+    if o["status"] == "CLOSED":
+        st.info("This order is closed. Outstanding quantities remain unissued and the order is locked.")
+    elif o["status"] == "ISSUED":
         if user["role"] in ("STORE", "ADMIN"):
             st.info("This order is fully issued. Further increases may still be saved if needed.")
         else:
@@ -1013,6 +1162,49 @@ def page_issue_stock():
             st.rerun()
         except ValueError as e:
             st.error(str(e))
+
+    st.divider()
+    st.subheader("Issue History")
+    st.caption("Most recent 10 items issued through this page.")
+
+    recent_issues = get_recent_adhoc_issues(limit=10)
+
+    if not recent_issues:
+        st.info("No issue history found.")
+    else:
+        history_rows = []
+
+        for issue in recent_issues:
+            created_at = issue.get("created_at")
+            if hasattr(created_at, "strftime"):
+                display_date = created_at.strftime("%d-%b-%Y")
+            else:
+                raw_date = str(created_at or "")[:10]
+                try:
+                    display_date = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%d-%b-%Y")
+                except ValueError:
+                    display_date = raw_date
+
+            history_rows.append({
+                "Date": display_date,
+                "Item": issue.get("item_name", ""),
+                "Qty": int(issue.get("qty") or 0),
+                "Issued To": issue.get("issued_to") or "",
+                "Issued By": issue.get("created_by") or "",
+            })
+
+        st.dataframe(
+            history_rows,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Date": st.column_config.TextColumn("Date"),
+                "Item": st.column_config.TextColumn("Item"),
+                "Qty": st.column_config.NumberColumn("Qty", format="%d"),
+                "Issued To": st.column_config.TextColumn("Issued To"),
+                "Issued By": st.column_config.TextColumn("Issued By"),
+            },
+        )
 
     st.divider()
 
@@ -1371,9 +1563,42 @@ def page_stock_card():
         default_sheet = wb.active
         wb.remove(default_sheet)
 
-        for item_name in selections:
+        # Monthly-report items first, following Report Line Master display order.
+        # Inventory-only / unmapped items follow using Item Master display order.
+        report_lines = load_report_line_master_rows()
+        report_mappings = load_report_mapping_rows()
+        item_lookup = get_item_master_lookup()
+
+        report_order_by_line_name = {
+            row["report_line_name"]: int(row["display_line_order"])
+            for row in report_lines
+        }
+        report_line_name_by_item = {
+            row["item_name"]: row["report_line_name"]
+            for row in report_mappings
+            if row.get("item_name") and row.get("report_line_name")
+        }
+
+        def stock_card_sort_key(item_name):
+            report_line_name = report_line_name_by_item.get(item_name)
+            report_order = report_order_by_line_name.get(report_line_name)
+            item_order = int(item_lookup.get(item_name, {}).get("display_order", 999999))
+
+            if report_order is not None:
+                return (0, report_order, item_order, item_name.lower())
+
+            return (1, item_order, item_name.lower())
+
+        ordered_selections = sorted(selections, key=stock_card_sort_key)
+
+        for item_name in ordered_selections:
             sheet_name = safe_sheet_name(item_name)
             ws = wb.create_sheet(title=sheet_name)
+
+            # Light-green worksheet tab identifies an item mapped to the monthly report.
+            report_line_name = report_line_name_by_item.get(item_name)
+            if report_line_name in report_order_by_line_name:
+                ws.sheet_properties.tabColor = "C6EFCE"
 
             ws["A1"] = "Item"
             ws["B1"] = item_name
@@ -3802,6 +4027,7 @@ def router():
 # ---------------------------
 def main():
     ensure_bootstrap()
+    restore_persistent_login()
     router()
 
 

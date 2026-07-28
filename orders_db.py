@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 from db import get_conn, ph, DB_TYPE, now_iso
 from templates import get_template_items
 from stock_db import get_current_stock
@@ -56,7 +56,8 @@ def get_order_by_unique(team_code: str, template_day: str, run_date: str):
 
     cur.execute(f"""
         SELECT order_id, team_code, template_day, run_date, status,
-               created_by, created_at, issued_by, issued_at
+               created_by, created_at, issued_by, issued_at,
+               closed_reason, closed_by, closed_at
         FROM orders
         WHERE team_code = {ph()} AND template_day = {ph()} AND run_date = {ph()} AND status != 'CANCELLED'
         LIMIT 1
@@ -77,7 +78,8 @@ def get_order(order_id: int):
 
     query = f"""
         SELECT order_id, team_code, template_day, run_date, status,
-               created_by, created_at, issued_by, issued_at
+               created_by, created_at, issued_by, issued_at,
+               closed_reason, closed_by, closed_at
         FROM orders
         WHERE order_id = {ph()}
     """
@@ -92,18 +94,33 @@ def get_order(order_id: int):
     return dict(row)
 
 
+def _recent_order_cutoff() -> str:
+    """Returns the first day of the previous calendar month as YYYY-MM-DD."""
+    today = date.today()
+
+    if today.month == 1:
+        cutoff = date(today.year - 1, 12, 1)
+    else:
+        cutoff = date(today.year, today.month - 1, 1)
+
+    return cutoff.isoformat()
+
+
 def list_orders_for_team(team_code: str):
+    """Lists only orders whose run_date is in the current or previous month."""
     conn = get_conn()
     cur = conn.cursor()
 
     query = f"""
         SELECT order_id, team_code, template_day, run_date, status,
-               created_by, created_at, issued_by, issued_at
+               created_by, created_at, issued_by, issued_at,
+               closed_by, closed_at, closed_reason
         FROM orders
         WHERE team_code = {ph()}
+          AND run_date >= {ph()}
         ORDER BY run_date DESC, order_id DESC
     """
-    cur.execute(query, (team_code,))
+    cur.execute(query, (team_code, _recent_order_cutoff()))
 
     rows = cur.fetchall()
     conn.close()
@@ -111,43 +128,51 @@ def list_orders_for_team(team_code: str):
     return [dict(r) for r in rows]
 
 
-def list_orders_for_store(status=None):
+def list_orders_for_store(status=None, recent_only: bool = True):
+    """
+    Lists orders for Store/Admin.
+
+    Store should use recent_only=True to show the current and previous month.
+    Admin can use recent_only=False to retain full history.
+    """
     conn = get_conn()
     cur = conn.cursor()
 
+    where_clauses = []
+    params = []
+
     if status:
-        query = f"""
-            SELECT order_id, team_code, template_day, run_date, status,
-                   created_by, created_at, issued_by, issued_at
-            FROM orders
-            WHERE status = {ph()}
-            ORDER BY
-                CASE status
-                    WHEN 'PENDING' THEN 1
-                    WHEN 'PARTIALLY_ISSUED' THEN 2
-                    WHEN 'ISSUED' THEN 3
-                    ELSE 99
-                END,
-                run_date DESC,
-                order_id DESC
-        """
-        cur.execute(query, (status,))
-    else:
-        query = f"""
-            SELECT order_id, team_code, template_day, run_date, status,
-                   created_by, created_at, issued_by, issued_at
-            FROM orders
-            ORDER BY
-                CASE status
-                    WHEN 'PENDING' THEN 1
-                    WHEN 'PARTIALLY_ISSUED' THEN 2
-                    WHEN 'ISSUED' THEN 3
-                    ELSE 99
-                END,
-                run_date DESC,
-                order_id DESC
-        """
-        cur.execute(query)
+        where_clauses.append(f"status = {ph()}")
+        params.append(status)
+
+    if recent_only:
+        where_clauses.append(f"run_date >= {ph()}")
+        params.append(_recent_order_cutoff())
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    query = f"""
+        SELECT order_id, team_code, template_day, run_date, status,
+               created_by, created_at, issued_by, issued_at,
+               closed_by, closed_at, closed_reason
+        FROM orders
+        {where_sql}
+        ORDER BY
+            CASE status
+                WHEN 'PENDING' THEN 1
+                WHEN 'PARTIALLY_ISSUED' THEN 2
+                WHEN 'ISSUED' THEN 3
+                WHEN 'CLOSED' THEN 4
+                WHEN 'CANCELLED' THEN 5
+                ELSE 99
+            END,
+            run_date DESC,
+            order_id DESC
+    """
+
+    cur.execute(query, tuple(params))
 
     rows = cur.fetchall()
     conn.close()
@@ -246,6 +271,41 @@ def cancel_order(order_id, cancelled_by, cancel_reason):
     conn.close()
 
     return rows_updated
+
+def close_order(order_id: int, closed_by: str, closed_reason: str):
+    """
+    Closes a partially issued order without issuing the remaining quantities.
+
+    The requested and issued quantities are preserved for audit purposes.
+    Only PARTIALLY_ISSUED orders may be closed.
+    """
+    reason = (closed_reason or "").strip()
+    if not reason:
+        raise ValueError("A closure reason is required.")
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute(f"""
+        UPDATE orders
+        SET status = 'CLOSED',
+            closed_reason = {ph()},
+            closed_by = {ph()},
+            closed_at = {ph()}
+        WHERE order_id = {ph()}
+          AND status = 'PARTIALLY_ISSUED'
+    """, (
+        reason,
+        closed_by,
+        now_iso(),
+        int(order_id),
+    ))
+
+    rows_updated = cur.rowcount
+    conn.commit()
+    conn.close()
+    return rows_updated
+
 
 # ---------------------------
 # Order lines

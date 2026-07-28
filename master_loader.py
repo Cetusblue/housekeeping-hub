@@ -152,6 +152,7 @@ def sync_users_from_workbook():
 # ---------------------------
 # Item Master
 # ---------------------------
+@st.cache_data(show_spinner=False)
 def load_item_master_rows():
     wb = _open_workbook()
     if "Item Master" not in wb.sheetnames:
@@ -245,6 +246,7 @@ def get_item_master_lookup():
 # ---------------------------
 # Report Line Master
 # ---------------------------
+@st.cache_data(show_spinner=False)
 def load_report_line_master_rows():
     """
     Reads the 'Report Line Master' sheet from Master Lists.xlsx.
@@ -332,6 +334,7 @@ def load_report_line_master_rows():
 # ---------------------------
 # Report Mapping
 # ---------------------------
+@st.cache_data(show_spinner=False)
 def load_report_mapping_rows():
     """
     Reads the 'Report Mapping' sheet.
@@ -383,6 +386,7 @@ def load_report_mapping_rows():
 
     return rows
 
+@st.cache_data(show_spinner=False)
 def load_destinations_rows():
     """
     Reads the 'Destinations' sheet from Master Lists.xlsx.
@@ -447,6 +451,7 @@ def load_destinations_rows():
     rows.sort(key=lambda x: x["display_order"])
     return rows
 
+@st.cache_data(show_spinner=False)
 def load_audit_locations_rows():
     """
     Reads 'Glo Gel Locations' sheet.
@@ -488,6 +493,7 @@ def load_audit_locations_rows():
     rows.sort(key=lambda x: x["display_order"])
     return rows
 
+@st.cache_data(show_spinner=False)
 def load_audit_surfaces_rows():
     """
     Reads 'Audit Surfaces' sheet.
