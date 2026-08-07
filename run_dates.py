@@ -20,3 +20,4 @@ def compute_run_date(today: date, template_day: str) -> date:
         days_ahead = 7
 
     return today + timedelta(days=days_ahead)
+

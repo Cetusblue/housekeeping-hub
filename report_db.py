@@ -192,3 +192,4 @@ def get_half_year_report_data(year: int, period_code: str):
             })
 
     return result
+

@@ -260,7 +260,7 @@ def page_login():
     Stock Card:
     - Improved worksheet organization.
     - Report-related items are now grouped more logically.
-    - Report-tabs are highlighted for easier identifcation.
+    - Report-tabs are highlighted for easier identification.
 
     Login Experience:
     - Added "Keep me logged in" option.
