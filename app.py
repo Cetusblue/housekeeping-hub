@@ -257,6 +257,9 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    12/8/2026
+    Beta-Testing: Linen Manual Top-Up System
+
     28/7/2026 *MAJOR UPDATE*
     Order Management:
     - Added Close Order function for partially fulfilled orders. (STORE)
@@ -4032,7 +4035,6 @@ def page_linen_manual_topup():
     require_login()
     user = st.session_state["user"]
 
-    # Manual Top Up is intentionally restricted to linen roles only.
     if user["role"] not in ("LINREP", "LINTEAM", "LINSUP"):
         st.error("Access denied.")
         return
@@ -4045,52 +4047,127 @@ def page_linen_manual_topup():
     if st.session_state.pop("manual_topup_success", False):
         st.success("Manual top up submitted successfully.")
 
-    # ---------------------------
-    # Temporary location selector
-    # QR scanner will replace this later
-    # ---------------------------
-    locations = [
-        row
-        for row in load_linen_locations_rows()
-        if str(row.get("manual_topup", "")).strip().upper() == "Y"
-    ]
+    # Used to reset the QR scanner after each completed/cancelled location.
+    if "manual_topup_scan_nonce" not in st.session_state:
+        st.session_state["manual_topup_scan_nonce"] = 0
 
-    if not locations:
-        st.warning("No Manual Top Up locations configured.")
-        if st.button("Back", use_container_width=True):
-            st.session_state["page"] = "home"
-            st.rerun()
-        return
-
-    location_lookup = {}
-
-    for loc in locations:
-        label = (
-            f"{loc['tower']} - {loc['level']} - "
-            f"{loc['zone']} - {loc['location_name']}"
-        )
-        location_lookup[label] = loc
-
-    selected_label = st.selectbox(
-        "Location",
-        list(location_lookup.keys()),
-        key="manual_topup_location"
+    active_location_id = st.session_state.get(
+        "manual_topup_location_id"
     )
 
-    selected_location = location_lookup[selected_label]
-    location_id = selected_location["location_id"]
+    # =========================================================
+    # STEP 1 — SCAN LOCATION
+    # =========================================================
+    if not active_location_id:
+
+        st.subheader("Scan Location")
+        st.caption(
+            "Point the camera at the Manual Top Up QR code."
+        )
+
+        scanned = qrcode_scanner(
+            key=f"manual_topup_scanner_{st.session_state['manual_topup_scan_nonce']}"
+        )
+
+        if scanned:
+            scanned = str(scanned).strip()
+
+            if not scanned.startswith("LTU:"):
+                st.error(
+                    "Invalid QR code. Please scan a Manual Top Up QR code."
+                )
+
+            else:
+                raw_token = scanned[4:].strip()
+
+                location_id = resolve_qr_token(raw_token)
+
+                if not location_id:
+                    st.error(
+                        "QR code is invalid or inactive."
+                    )
+
+                else:
+                    location_map = get_linen_location_map()
+                    location = location_map.get(location_id)
+
+                    if not location:
+                        st.error(
+                            "Location could not be found."
+                        )
+
+                    elif str(
+                        location.get("manual_topup", "")
+                    ).strip().upper() != "Y":
+                        st.error(
+                            "This location is not configured for Manual Top Up."
+                        )
+
+                    else:
+                        st.session_state[
+                            "manual_topup_location_id"
+                        ] = location_id
+
+                        st.rerun()
+
+        st.divider()
+
+        if st.button(
+            "Back",
+            use_container_width=True,
+            key="manual_topup_scan_back"
+        ):
+            st.session_state["page"] = "home"
+            st.rerun()
+
+        return
+
+    # =========================================================
+    # STEP 2 — LOCATION FOUND
+    # =========================================================
+    location_map = get_linen_location_map()
+    location = location_map.get(active_location_id)
+
+    if not location:
+        st.error("Location could not be found.")
+
+        st.session_state.pop(
+            "manual_topup_location_id",
+            None
+        )
+
+        return
+
+    location_display = " - ".join(
+        part
+        for part in [
+            location.get("zone"),
+            location.get("location_name"),
+        ]
+        if str(part or "").strip()
+    )
+
+    st.success("Location scanned successfully.")
+
+    st.markdown(
+        f"### {location_display}"
+    )
 
     st.caption(
-        f"Location ID: {location_id}"
+        f"Location ID: {active_location_id}"
     )
 
     # ---------------------------
     # Load location items
     # ---------------------------
-    items = get_linen_items_for_location(location_id)
+    items = get_linen_items_for_location(
+        active_location_id
+    )
 
     if not items:
-        st.warning("No linen items configured for this location.")
+        st.warning(
+            "No linen items configured for this location."
+        )
 
     else:
         st.subheader("Top Up Quantities")
@@ -4098,12 +4175,18 @@ def page_linen_manual_topup():
         topup_lines = []
 
         for item in items:
+            widget_key = (
+                f"manual_topup_"
+                f"{active_location_id}_"
+                f"{item['item_no']}"
+            )
+
             qty = st.number_input(
                 item["item_name"],
                 min_value=0,
                 step=1,
                 value=0,
-                key=f"manual_topup_{location_id}_{item['item_no']}"
+                key=widget_key
             )
 
             topup_lines.append({
@@ -4111,39 +4194,103 @@ def page_linen_manual_topup():
                 "quantity": int(qty or 0),
             })
 
+        # ---------------------------
+        # Submit
+        # ---------------------------
         if st.button(
             "Submit Top Up",
             use_container_width=True,
-            key=f"submit_manual_topup_{location_id}"
+            key=f"submit_manual_topup_{active_location_id}"
         ):
             try:
                 create_manual_topup(
-                    location_id=location_id,
+                    location_id=active_location_id,
                     created_by=user["username"],
                     lines=topup_lines,
                 )
 
-                # Clear number input widget states after successful submission.
+                # Clear quantity fields.
                 for item in items:
-                    key = f"manual_topup_{location_id}_{item['item_no']}"
-                    st.session_state.pop(key, None)
+                    widget_key = (
+                        f"manual_topup_"
+                        f"{active_location_id}_"
+                        f"{item['item_no']}"
+                    )
 
-                st.session_state["manual_topup_success"] = True
+                    st.session_state.pop(
+                        widget_key,
+                        None
+                    )
+
+                # Clear current location.
+                st.session_state.pop(
+                    "manual_topup_location_id",
+                    None
+                )
+
+                # Force a fresh scanner instance.
+                st.session_state[
+                    "manual_topup_scan_nonce"
+                ] += 1
+
+                st.session_state[
+                    "manual_topup_success"
+                ] = True
+
                 st.rerun()
 
             except ValueError as e:
                 st.warning(str(e))
 
             except Exception as e:
-                st.error(f"Could not save Manual Top Up: {e}")
+                st.error(
+                    f"Could not save Manual Top Up: {e}"
+                )
 
+    # ---------------------------
+    # Scan another / cancel
+    # ---------------------------
     st.divider()
+
+    if st.button(
+        "Scan Another Location",
+        use_container_width=True,
+        key="manual_topup_scan_another"
+    ):
+
+        for item in items:
+            widget_key = (
+                f"manual_topup_"
+                f"{active_location_id}_"
+                f"{item['item_no']}"
+            )
+
+            st.session_state.pop(
+                widget_key,
+                None
+            )
+
+        st.session_state.pop(
+            "manual_topup_location_id",
+            None
+        )
+
+        st.session_state[
+            "manual_topup_scan_nonce"
+        ] += 1
+
+        st.rerun()
 
     if st.button(
         "Back",
         use_container_width=True,
         key="manual_topup_back"
     ):
+        st.session_state.pop(
+            "manual_topup_location_id",
+            None
+        )
+
         st.session_state["page"] = "home"
         st.rerun()
 
@@ -4204,58 +4351,6 @@ def generate_manual_topup_qr_zip():
     zip_buffer.seek(0)
     return zip_buffer
 
-def page_qr_test():
-    require_login()
-    user = st.session_state["user"]
-
-    if user["role"] not in ("LINREP", "LINTEAM", "LINSUP"):
-        st.error("Access denied.")
-        return
-
-    st.title("QR Scanner Test")
-    st.caption("Point the camera at a Manual Top Up QR code.")
-
-    scanned = qrcode_scanner(key="manual_topup_qr_test")
-
-    if scanned:
-        scanned = str(scanned).strip()
-
-        st.write("QR read:")
-        st.code(scanned)
-
-        if not scanned.startswith("LTU:"):
-            st.error("This is not a valid Manual Top Up QR code.")
-
-        else:
-            raw_token = scanned[4:].strip()
-
-            location_id = resolve_qr_token(raw_token)
-
-            if not location_id:
-                st.error("QR code is invalid or inactive.")
-
-            else:
-                location_map = get_linen_location_map()
-                location = location_map.get(location_id)
-
-                if not location:
-                    st.error("Location could not be found.")
-
-                else:
-                    st.success("QR recognised.")
-
-                    st.write(
-                        f"**Location:** {location['location_name']}"
-                    )
-
-                    st.write(
-                        f"**Location ID:** {location_id}"
-                    )
-
-    if st.button("Back", use_container_width=True):
-        st.session_state["page"] = "home"
-        st.rerun()
-
 # ---------------------------
 # Router
 # ---------------------------
@@ -4296,8 +4391,6 @@ def router():
         page_linen_manage()
     elif page == "linen_manual_topup":
         page_linen_manual_topup()
-    elif page == "qr_test":
-        page_qr_test()
     else:
         st.session_state["page"] = "login"
         page_login()
