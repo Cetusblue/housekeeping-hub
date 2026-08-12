@@ -383,6 +383,51 @@ def init_db_postgres():
     )
     """)
 
+    # ---------------------------
+    # Linen Manual Top Up
+    # ---------------------------
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS linen_topups (
+        topup_id SERIAL PRIMARY KEY,
+        location_id TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_linen_topups_location
+    ON linen_topups(location_id)
+    """)
+
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_linen_topups_created_at
+    ON linen_topups(created_at)
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS linen_topup_lines (
+        id SERIAL PRIMARY KEY,
+        topup_id INTEGER NOT NULL REFERENCES linen_topups(topup_id),
+        item_no TEXT NOT NULL,
+        quantity INTEGER NOT NULL CHECK(quantity > 0)
+    )
+    """)
+
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_linen_topup_lines_topup
+    ON linen_topup_lines(topup_id)
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS linen_topup_qr_tokens (
+        location_id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        active BOOLEAN NOT NULL DEFAULT TRUE
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -467,3 +512,4 @@ def seed_minimal_data():
 
 def ph():
     return "%s" if DB_TYPE == "postgres" else "?"
+

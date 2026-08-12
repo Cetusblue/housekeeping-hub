@@ -559,6 +559,12 @@ def load_linen_locations_rows():
         lin_b11_16 = _normalize_text(row[idx["lin_B11-16"]]) if "lin_B11-16" in idx else ""
         lin_c1_12 = _normalize_text(row[idx["lin_C1-12"]]) if "lin_C1-12" in idx else ""
 
+        manual_topup = (
+            _normalize_text(row[idx["manual_topup"]])
+            if "manual_topup" in idx
+            else ""
+        )
+
         if not location_id:
             continue
 
@@ -573,6 +579,7 @@ def load_linen_locations_rows():
             "lin_B5-10": lin_b5_10,
             "lin_B11-16": lin_b11_16,
             "lin_C1-12": lin_c1_12,
+            "manual_topup": manual_topup,
         })
 
     return rows

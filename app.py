@@ -100,6 +100,16 @@ from linen_db import (
     get_linen_rep_names
 )
 
+import qrcode
+import zipfile
+
+from linen_topup_db import (
+    create_manual_topup,
+    create_qr_token_for_location,
+    resolve_qr_token,
+)
+
+from streamlit_qrcode_scanner import qrcode_scanner
 
 st.set_page_config(page_title="Ops Hub", layout="centered")
 
@@ -394,6 +404,11 @@ def page_home():
             )
 
     if role in ("LINSUP", "LINTEAM", "LINREP"):
+
+        if st.button("Manual Top Up", use_container_width=True):
+            st.session_state["page"] = "qr_test"
+            st.rerun()
+
         if st.button(
             "Linen Inventory",
             use_container_width=True,
@@ -2150,6 +2165,40 @@ def page_system_tools():
 
             st.success("Linen inventory force-completed for UAT.")
             st.rerun()
+
+    st.divider()
+    st.subheader("Manual Top Up QR Codes")
+
+    st.warning(
+        "Generating QR codes will replace all existing "
+        "Manual Top Up QR tokens. Previously generated QR codes "
+        "will stop working."
+    )
+
+    if st.button(
+        "Generate Manual Top Up QR Codes",
+        use_container_width=True
+    ):
+        try:
+            st.session_state["manual_topup_qr_zip"] = (
+                generate_manual_topup_qr_zip()
+            )
+
+            st.success(
+                "Manual Top Up QR codes generated."
+            )
+
+        except Exception as e:
+            st.error(str(e))
+
+    if "manual_topup_qr_zip" in st.session_state:
+        st.download_button(
+            "Download QR Codes",
+            data=st.session_state["manual_topup_qr_zip"],
+            file_name="manual_topup_qr_codes.zip",
+            mime="application/zip",
+            use_container_width=True,
+        )
 
     if st.button("Back", use_container_width=True):
         st.session_state["page"] = "home"
@@ -3979,6 +4028,234 @@ def generate_linen_report_excel(cycle_id):
 
     return output
 
+def page_linen_manual_topup():
+    require_login()
+    user = st.session_state["user"]
+
+    # Manual Top Up is intentionally restricted to linen roles only.
+    if user["role"] not in ("LINREP", "LINTEAM", "LINSUP"):
+        st.error("Access denied.")
+        return
+
+    st.title("Manual Top Up")
+
+    # ---------------------------
+    # Success message
+    # ---------------------------
+    if st.session_state.pop("manual_topup_success", False):
+        st.success("Manual top up submitted successfully.")
+
+    # ---------------------------
+    # Temporary location selector
+    # QR scanner will replace this later
+    # ---------------------------
+    locations = [
+        row
+        for row in load_linen_locations_rows()
+        if str(row.get("manual_topup", "")).strip().upper() == "Y"
+    ]
+
+    if not locations:
+        st.warning("No Manual Top Up locations configured.")
+        if st.button("Back", use_container_width=True):
+            st.session_state["page"] = "home"
+            st.rerun()
+        return
+
+    location_lookup = {}
+
+    for loc in locations:
+        label = (
+            f"{loc['tower']} - {loc['level']} - "
+            f"{loc['zone']} - {loc['location_name']}"
+        )
+        location_lookup[label] = loc
+
+    selected_label = st.selectbox(
+        "Location",
+        list(location_lookup.keys()),
+        key="manual_topup_location"
+    )
+
+    selected_location = location_lookup[selected_label]
+    location_id = selected_location["location_id"]
+
+    st.caption(
+        f"Location ID: {location_id}"
+    )
+
+    # ---------------------------
+    # Load location items
+    # ---------------------------
+    items = get_linen_items_for_location(location_id)
+
+    if not items:
+        st.warning("No linen items configured for this location.")
+
+    else:
+        st.subheader("Top Up Quantities")
+
+        topup_lines = []
+
+        for item in items:
+            qty = st.number_input(
+                item["item_name"],
+                min_value=0,
+                step=1,
+                value=0,
+                key=f"manual_topup_{location_id}_{item['item_no']}"
+            )
+
+            topup_lines.append({
+                "item_no": item["item_no"],
+                "quantity": int(qty or 0),
+            })
+
+        if st.button(
+            "Submit Top Up",
+            use_container_width=True,
+            key=f"submit_manual_topup_{location_id}"
+        ):
+            try:
+                create_manual_topup(
+                    location_id=location_id,
+                    created_by=user["username"],
+                    lines=topup_lines,
+                )
+
+                # Clear number input widget states after successful submission.
+                for item in items:
+                    key = f"manual_topup_{location_id}_{item['item_no']}"
+                    st.session_state.pop(key, None)
+
+                st.session_state["manual_topup_success"] = True
+                st.rerun()
+
+            except ValueError as e:
+                st.warning(str(e))
+
+            except Exception as e:
+                st.error(f"Could not save Manual Top Up: {e}")
+
+    st.divider()
+
+    if st.button(
+        "Back",
+        use_container_width=True,
+        key="manual_topup_back"
+    ):
+        st.session_state["page"] = "home"
+        st.rerun()
+
+def generate_manual_topup_qr_zip():
+    locations = [
+        row
+        for row in load_linen_locations_rows()
+        if str(
+            row.get("manual_topup", "")
+        ).strip().upper() == "Y"
+    ]
+
+    if not locations:
+        raise ValueError(
+            "No Manual Top Up locations configured."
+        )
+
+    zip_buffer = BytesIO()
+
+    with zipfile.ZipFile(
+        zip_buffer,
+        "w",
+        zipfile.ZIP_DEFLATED
+    ) as zf:
+
+        for loc in locations:
+            location_id = loc["location_id"]
+
+            raw_token = create_qr_token_for_location(
+                location_id
+            )
+
+            qr_payload = f"LTU:{raw_token}"
+
+            qr = qrcode.make(qr_payload)
+
+            image_buffer = BytesIO()
+            qr.save(
+                image_buffer,
+                format="PNG"
+            )
+
+            image_buffer.seek(0)
+
+            safe_name = (
+                f"{location_id}_"
+                f"{loc['location_name']}"
+            )
+
+            for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
+                safe_name = safe_name.replace(char, "-")
+
+            zf.writestr(
+                f"{safe_name}.png",
+                image_buffer.getvalue()
+            )
+
+    zip_buffer.seek(0)
+    return zip_buffer
+
+def page_qr_test():
+    require_login()
+    user = st.session_state["user"]
+
+    if user["role"] not in ("LINREP", "LINTEAM", "LINSUP"):
+        st.error("Access denied.")
+        return
+
+    st.title("QR Scanner Test")
+    st.caption("Point the camera at a Manual Top Up QR code.")
+
+    scanned = qrcode_scanner(key="manual_topup_qr_test")
+
+    if scanned:
+        scanned = str(scanned).strip()
+
+        st.write("QR read:")
+        st.code(scanned)
+
+        if not scanned.startswith("LTU:"):
+            st.error("This is not a valid Manual Top Up QR code.")
+
+        else:
+            raw_token = scanned[4:].strip()
+
+            location_id = resolve_qr_token(raw_token)
+
+            if not location_id:
+                st.error("QR code is invalid or inactive.")
+
+            else:
+                location_map = get_linen_location_map()
+                location = location_map.get(location_id)
+
+                if not location:
+                    st.error("Location could not be found.")
+
+                else:
+                    st.success("QR recognised.")
+
+                    st.write(
+                        f"**Location:** {location['location_name']}"
+                    )
+
+                    st.write(
+                        f"**Location ID:** {location_id}"
+                    )
+
+    if st.button("Back", use_container_width=True):
+        st.session_state["page"] = "home"
+        st.rerun()
+
 # ---------------------------
 # Router
 # ---------------------------
@@ -4017,6 +4294,10 @@ def router():
         page_linen_count()
     elif page == "linen_manage":
         page_linen_manage()
+    elif page == "linen_manual_topup":
+        page_linen_manual_topup()
+    elif page == "qr_test":
+        page_qr_test()
     else:
         st.session_state["page"] = "login"
         page_login()
