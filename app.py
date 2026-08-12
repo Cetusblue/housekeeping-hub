@@ -409,7 +409,7 @@ def page_home():
     if role in ("LINSUP", "LINTEAM", "LINREP"):
 
         if st.button("Manual Top Up", use_container_width=True):
-            st.session_state["page"] = "qr_test"
+            st.session_state["page"] = "linen_manual_topup"
             st.rerun()
 
         if st.button(
