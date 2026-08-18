@@ -1,6 +1,7 @@
 import streamlit as st
 from datetime import date
 from orders_db import cancel_order, close_order
+import calendar
 
 from audit_db import (
     get_visible_locations_for_user,
@@ -107,6 +108,11 @@ from linen_topup_db import (
     create_manual_topup,
     create_qr_token_for_location,
     resolve_qr_token,
+    purge_old_manual_topups,
+)
+
+from linen_topup_report import (
+    generate_manual_topup_report,
 )
 
 from streamlit_qrcode_scanner import qrcode_scanner
@@ -123,6 +129,7 @@ def ensure_bootstrap():
     # not on every Streamlit widget rerun.
     init_db()
     seed_minimal_data()
+    purge_old_manual_topups()
     return True
 
 
@@ -390,6 +397,33 @@ def page_home():
         if st.button("Initiate/ Manage Linen Inventory", use_container_width=True):
             st.session_state["page"] = "linen_manage"
             st.rerun()
+
+    if role == "LINSUP":
+        if st.button(
+            "Manual Top Up Report",
+            use_container_width=True
+        ):
+            st.session_state["page"] = "linen_topup_report"
+            st.rerun()
+
+    if st.session_state.get(
+        "manual_topup_report_file"
+    ):
+        st.download_button(
+            "Download Manual Top Up Report",
+            data=st.session_state[
+                "manual_topup_report_file"
+            ],
+            file_name=(
+                "Manual Top Up Report "
+                "August 2026.xlsx"
+            ),
+            mime=(
+                "application/vnd.openxmlformats-"
+                "officedocument.spreadsheetml.sheet"
+            ),
+            use_container_width=True,
+        )
 
     if role == "LINREP":
         active_cycle = get_active_linen_cycle()
@@ -1463,9 +1497,9 @@ def _generate_half_year_report_excel(year: int, period_code: str):
 
         excel_row = 6
 
-        for row in report_data[sheet_name]:
+        for sn, row in enumerate(report_data[sheet_name], start=1):
             # Static columns A:F
-            ws.cell(row=excel_row, column=1, value=row["report_line_id"])     # A
+            ws.cell(row=excel_row, column=1, value=sn)                        # A
             ws.cell(row=excel_row, column=2, value=row["for_column_b"])       # B
             ws.cell(row=excel_row, column=3, value=row["report_line_name"])   # C
             ws.cell(row=excel_row, column=4, value=row["report_uom"])         # D
@@ -4351,6 +4385,132 @@ def generate_manual_topup_qr_zip():
     zip_buffer.seek(0)
     return zip_buffer
 
+def page_linen_topup_report():
+    require_login()
+    user = st.session_state["user"]
+
+    if user["role"] != "LINSUP":
+        st.error("Access denied.")
+        return
+
+    st.title("Manual Top Up Report")
+
+    today = date.today()
+
+    month_names = [
+        calendar.month_name[m]
+        for m in range(1, 13)
+    ]
+
+    selected_month_name = st.selectbox(
+        "Month",
+        month_names,
+        index=today.month - 1,
+        key="manual_topup_report_month"
+    )
+
+    selected_month = month_names.index(
+        selected_month_name
+    ) + 1
+
+    year_options = list(
+        range(today.year, today.year - 3, -1)
+    )
+
+    selected_year = st.selectbox(
+        "Year",
+        year_options,
+        index=0,
+        key="manual_topup_report_year"
+    )
+
+    selection_key = (
+        int(selected_year),
+        int(selected_month)
+    )
+
+    if (
+        st.session_state.get(
+            "manual_topup_report_selection"
+        )
+        != selection_key
+    ):
+        st.session_state.pop(
+            "manual_topup_report_file",
+            None
+        )
+
+        st.session_state.pop(
+            "manual_topup_report_filename",
+            None
+        )
+
+        st.session_state[
+            "manual_topup_report_selection"
+        ] = selection_key
+
+    st.divider()
+
+    if st.button(
+        "Generate Report",
+        use_container_width=True
+    ):
+        try:
+            report_file = generate_manual_topup_report(
+                int(selected_year),
+                int(selected_month)
+            )
+
+            st.session_state[
+                "manual_topup_report_file"
+            ] = report_file.getvalue()
+
+            st.session_state[
+                "manual_topup_report_filename"
+            ] = (
+                f"Manual Top Up Report "
+                f"{selected_month_name} "
+                f"{selected_year}.xlsx"
+            )
+
+            st.success(
+                "Manual Top Up report generated."
+            )
+
+        except Exception as e:
+            st.error(
+                f"Could not generate report: {e}"
+            )
+
+    if st.session_state.get(
+        "manual_topup_report_file"
+    ):
+        st.download_button(
+            "Download Report",
+            data=st.session_state[
+                "manual_topup_report_file"
+            ],
+            file_name=st.session_state.get(
+                "manual_topup_report_filename",
+                "Manual Top Up Report.xlsx"
+            ),
+            mime=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            use_container_width=True,
+        )
+
+    st.divider()
+
+    if st.button(
+        "Back",
+        use_container_width=True,
+        key="manual_topup_report_back"
+    ):
+        st.session_state["page"] = "home"
+        st.rerun()
+
 # ---------------------------
 # Router
 # ---------------------------
@@ -4391,6 +4551,8 @@ def router():
         page_linen_manage()
     elif page == "linen_manual_topup":
         page_linen_manual_topup()
+    elif page == "linen_topup_report":
+        page_linen_topup_report()
     else:
         st.session_state["page"] = "login"
         page_login()

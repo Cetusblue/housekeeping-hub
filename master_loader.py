@@ -565,6 +565,12 @@ def load_linen_locations_rows():
             else ""
         )
 
+        manual_report_mapping = (
+            _normalize_text(row[idx["manual_report_mapping"]])
+            if "manual_report_mapping" in idx
+            else ""
+        )
+        
         if not location_id:
             continue
 
@@ -580,6 +586,7 @@ def load_linen_locations_rows():
             "lin_B11-16": lin_b11_16,
             "lin_C1-12": lin_c1_12,
             "manual_topup": manual_topup,
+            "manual_report_mapping": manual_report_mapping,
         })
 
     return rows
@@ -610,10 +617,36 @@ def load_linen_master_rows():
         if not item_no or not item_name:
             continue
 
+        # Manual Top Up report mapping
+        man_report_mapping = (
+            _normalize_text(row[idx["man_report_mapping"]])
+            if "man_report_mapping" in idx
+            else ""
+        )
+
+        man_report_no_raw = (
+            row[idx["man_report_no"]]
+            if "man_report_no" in idx
+            else None
+        )
+
+        if man_report_no_raw in (None, ""):
+            man_report_no = None
+        else:
+            try:
+                man_report_no = int(man_report_no_raw)
+            except Exception:
+                raise ValueError(
+                    f"Linen Master item '{item_name}' has invalid "
+                    f"man_report_no: {man_report_no_raw}"
+                )
+
         item = {
             "item_no": item_no,
             "item_name": item_name,
             "lin_category": lin_category,
+            "man_report_mapping": man_report_mapping,
+            "man_report_no": man_report_no,
         }
 
         for h in headers:
