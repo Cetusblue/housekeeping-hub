@@ -49,7 +49,7 @@ def get_order_bucket(team_code: str, template_day: str):
         return "ANX Blk"
 
     # follow workbook/live naming as source of truth
-    if team_code in ("A-B2-B1", "A1-3", "A4-7"):
+    if team_code in ("AB2-B1", "AA1-3", "A4-8"):
         return "Tower A"
 
     if team_code in ("B1-4", "B5-10", "B11-16"):
