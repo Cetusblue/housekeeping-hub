@@ -264,6 +264,10 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    18/8/2026
+    - Fixed a logic error for monthly stock report
+    - Linen Manual Top-Up System is now live
+
     12/8/2026
     Beta-Testing: Linen Manual Top-Up System
 
@@ -292,15 +296,7 @@ def page_login():
 
     Performance Improvements:
     - Optimized database performance for faster page loading and smoother navigation.
-    - Reduced loading times across various modules, particularly during inventory and stock operations.
-
-    9/7/2026
-    - Revised linen item at various locations
-
-    7/7/2026
-    - Added more safeguard measures to prevent duplicate entries for Linen Inventory (TEAM)
-    - Assigned locations to LINREPs now will no longer reappear
-    - Removed inactive locations for Linen Inventory        
+    - Reduced loading times across various modules, particularly during inventory and stock operations.      
 
     """)
 
