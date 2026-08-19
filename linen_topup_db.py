@@ -444,3 +444,180 @@ def purge_old_manual_topups():
 
     finally:
         conn.close()
+
+def list_manual_topups_for_date(selected_date):
+    """
+    Returns individual Manual Top Up submissions for one date.
+    """
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            t.topup_id,
+            t.location_id,
+            t.created_by,
+            t.created_at,
+            t.corrected_by,
+            t.corrected_at,
+            t.correction_reason,
+            COALESCE(SUM(l.quantity), 0) AS total_quantity
+        FROM linen_topups t
+        LEFT JOIN linen_topup_lines l
+            ON l.topup_id = t.topup_id
+        WHERE DATE(t.created_at) = %s
+        GROUP BY
+            t.topup_id,
+            t.location_id,
+            t.created_by,
+            t.created_at,
+            t.corrected_by,
+            t.corrected_at,
+            t.correction_reason
+        ORDER BY
+            t.created_at DESC,
+            t.topup_id DESC
+    """, (str(selected_date),))
+
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+
+    return rows
+
+
+def get_manual_topup(topup_id):
+    """
+    Returns one Manual Top Up header and its saved lines.
+    """
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT *
+        FROM linen_topups
+        WHERE topup_id = %s
+    """, (int(topup_id),))
+
+    header = cur.fetchone()
+
+    if not header:
+        conn.close()
+        return None
+
+    cur.execute("""
+        SELECT
+            id,
+            topup_id,
+            item_no,
+            quantity
+        FROM linen_topup_lines
+        WHERE topup_id = %s
+        ORDER BY id
+    """, (int(topup_id),))
+
+    lines = [dict(r) for r in cur.fetchall()]
+    conn.close()
+
+    return {
+        "header": dict(header),
+        "lines": lines,
+    }
+
+
+def update_manual_topup(
+    topup_id,
+    corrected_by,
+    correction_reason,
+    lines
+):
+    """
+    Replaces the quantities belonging to one Manual Top Up transaction
+    while preserving the original submission header/date/user.
+    """
+
+    reason = str(correction_reason or "").strip()
+
+    if not reason:
+        raise ValueError("Correction reason is required.")
+
+    clean_lines = []
+
+    for line in lines:
+        qty = int(line.get("quantity") or 0)
+
+        if qty < 0:
+            raise ValueError(
+                "Top Up quantity cannot be negative."
+            )
+
+        # We only store positive lines.
+        if qty > 0:
+            clean_lines.append({
+                "item_no": str(line["item_no"]),
+                "quantity": qty,
+            })
+
+    if not clean_lines:
+        raise ValueError(
+            "At least one Top Up quantity must remain above zero."
+        )
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT topup_id
+            FROM linen_topups
+            WHERE topup_id = %s
+        """, (int(topup_id),))
+
+        if not cur.fetchone():
+            raise ValueError(
+                "Manual Top Up entry could not be found."
+            )
+
+        cur.execute("""
+            DELETE FROM linen_topup_lines
+            WHERE topup_id = %s
+        """, (int(topup_id),))
+
+        for line in clean_lines:
+            cur.execute("""
+                INSERT INTO linen_topup_lines (
+                    topup_id,
+                    item_no,
+                    quantity
+                )
+                VALUES (%s, %s, %s)
+            """, (
+                int(topup_id),
+                line["item_no"],
+                line["quantity"],
+            ))
+
+        cur.execute("""
+            UPDATE linen_topups
+            SET
+                corrected_by = %s,
+                corrected_at = CURRENT_TIMESTAMP,
+                correction_reason = %s
+            WHERE topup_id = %s
+        """, (
+            corrected_by,
+            reason,
+            int(topup_id),
+        ))
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
+
+    return True

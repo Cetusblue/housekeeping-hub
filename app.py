@@ -109,6 +109,9 @@ from linen_topup_db import (
     create_qr_token_for_location,
     resolve_qr_token,
     purge_old_manual_topups,
+    list_manual_topups_for_date,
+    get_manual_topup,
+    update_manual_topup,
 )
 
 from linen_topup_report import (
@@ -420,6 +423,14 @@ def page_home():
             ),
             use_container_width=True,
         )
+
+    if role in ("LINTEAM", "LINSUP"):
+        if st.button(
+            "Edit Manual Top Up Entries",
+            use_container_width=True
+        ):
+            st.session_state["page"] = "linen_topup_edit"
+            st.rerun()
 
     if role == "LINREP":
         active_cycle = get_active_linen_cycle()
@@ -4507,6 +4518,366 @@ def page_linen_topup_report():
         st.session_state["page"] = "home"
         st.rerun()
 
+def page_linen_topup_edit():
+    require_login()
+    user = st.session_state["user"]
+
+    if user["role"] not in ("LINTEAM", "LINSUP"):
+        st.error("Access denied.")
+        return
+
+    st.title("Edit Manual Top Up Entries")
+
+    if st.session_state.pop(
+        "topup_correction_success",
+        False
+    ):
+        st.success(
+            "Manual Top Up entry corrected successfully."
+        )
+
+    selected_date = st.date_input(
+        "Date",
+        value=date.today(),
+        key="linen_topup_edit_date"
+    )
+
+    entries = list_manual_topups_for_date(
+        selected_date
+    )
+
+    if not entries:
+        st.info(
+            "No Manual Top Up entries found for this date."
+        )
+
+        st.divider()
+
+        if st.button(
+            "Back",
+            use_container_width=True,
+            key="linen_topup_edit_back_empty"
+        ):
+            st.session_state["page"] = "home"
+            st.rerun()
+
+        return
+
+    location_map = get_linen_location_map()
+
+    # --------------------------------
+    # Location filter
+    # --------------------------------
+    location_ids = sorted({
+        row["location_id"]
+        for row in entries
+    })
+
+    location_options = {}
+
+    for location_id in location_ids:
+        loc = location_map.get(
+            location_id,
+            {}
+        )
+
+        location_display = " - ".join(
+            part
+            for part in [
+                loc.get("zone"),
+                loc.get("location_name"),
+            ]
+            if str(part or "").strip()
+        )
+
+        if not location_display:
+            location_display = location_id
+
+        location_options[
+            location_display
+        ] = location_id
+
+    selected_location_label = st.selectbox(
+        "Location",
+        list(location_options.keys()),
+        key="linen_topup_edit_location"
+    )
+
+    selected_location_id = location_options[
+        selected_location_label
+    ]
+
+    filtered_entries = [
+        row
+        for row in entries
+        if row["location_id"]
+        == selected_location_id
+    ]
+
+    st.divider()
+    st.subheader("Submissions")
+
+    # --------------------------------
+    # Display individual submissions
+    # --------------------------------
+    for entry in filtered_entries:
+        created_at = entry.get("created_at")
+
+        if hasattr(created_at, "strftime"):
+            display_time = created_at.strftime(
+                "%H:%M"
+            )
+        else:
+            display_time = str(created_at or "")
+
+        total_qty = int(
+            entry.get("total_quantity")
+            or 0
+        )
+
+        label = (
+            f"{display_time} | "
+            f"by {entry.get('created_by', '')} | "
+            f"Total Qty: {total_qty}"
+        )
+
+        if entry.get("corrected_at"):
+            label += " | ✏ Corrected"
+
+        with st.expander(
+            label,
+            expanded=False
+        ):
+            if entry.get("corrected_at"):
+                st.caption(
+                    f"Last corrected by "
+                    f"{entry.get('corrected_by') or '-'}"
+                )
+
+                st.caption(
+                    f"Reason: "
+                    f"{entry.get('correction_reason') or '-'}"
+                )
+
+            if st.button(
+                "Edit Entry",
+                key=f"open_topup_edit_{entry['topup_id']}",
+                use_container_width=True
+            ):
+                st.session_state[
+                    "linen_topup_edit_id"
+                ] = entry["topup_id"]
+
+                st.session_state[
+                    "page"
+                ] = "linen_topup_edit_detail"
+
+                st.rerun()
+
+    st.divider()
+
+    if st.button(
+        "Back",
+        use_container_width=True,
+        key="linen_topup_edit_back"
+    ):
+        st.session_state["page"] = "home"
+        st.rerun()
+
+def page_linen_topup_edit_detail():
+    require_login()
+    user = st.session_state["user"]
+
+    if user["role"] not in ("LINTEAM", "LINSUP"):
+        st.error("Access denied.")
+        return
+
+    topup_id = st.session_state.get(
+        "linen_topup_edit_id"
+    )
+
+    if not topup_id:
+        st.session_state["page"] = (
+            "linen_topup_edit"
+        )
+        st.rerun()
+
+    record = get_manual_topup(
+        int(topup_id)
+    )
+
+    if not record:
+        st.error(
+            "Manual Top Up entry not found."
+        )
+        return
+
+    header = record["header"]
+    saved_lines = record["lines"]
+
+    location_id = header["location_id"]
+
+    location_map = get_linen_location_map()
+    loc = location_map.get(
+        location_id,
+        {}
+    )
+
+    location_display = " - ".join(
+        part
+        for part in [
+            loc.get("zone"),
+            loc.get("location_name"),
+        ]
+        if str(part or "").strip()
+    )
+
+    st.title("Correct Manual Top Up")
+
+    st.write(
+        f"**Location:** "
+        f"{location_display or location_id}"
+    )
+
+    created_at = header.get(
+        "created_at"
+    )
+
+    st.write(
+        f"**Original Entry:** "
+        f"{created_at}"
+    )
+
+    st.write(
+        f"**Submitted By:** "
+        f"{header.get('created_by') or '-'}"
+    )
+
+    if header.get("corrected_at"):
+        st.info(
+            f"Previously corrected by "
+            f"{header.get('corrected_by') or '-'} "
+            f"on {header.get('corrected_at')}. "
+            f"Reason: "
+            f"{header.get('correction_reason') or '-'}"
+        )
+
+    saved_qty_map = {
+        str(line["item_no"]):
+        int(line["quantity"] or 0)
+        for line in saved_lines
+    }
+
+    items = get_linen_items_for_location(
+        location_id
+    )
+
+    if not items:
+        st.warning(
+            "No linen items configured for this location."
+        )
+        return
+
+    st.divider()
+    st.subheader("Correct Quantities")
+
+    corrected_lines = []
+
+    for item in items:
+        item_no = str(
+            item["item_no"]
+        )
+
+        qty = st.number_input(
+            item["item_name"],
+            min_value=0,
+            step=1,
+            value=saved_qty_map.get(
+                item_no,
+                0
+            ),
+            key=(
+                f"correct_topup_"
+                f"{topup_id}_"
+                f"{item_no}"
+            )
+        )
+
+        corrected_lines.append({
+            "item_no": item_no,
+            "quantity": int(qty or 0),
+        })
+
+    correction_reason = st.text_input(
+        "Correction Reason",
+        placeholder="e.g. Wrong quantity entered",
+        key=f"topup_correction_reason_{topup_id}"
+    )
+
+    st.divider()
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        if st.button(
+            "Save Correction",
+            use_container_width=True,
+            key=f"save_topup_correction_{topup_id}"
+        ):
+            if not correction_reason.strip():
+                st.warning(
+                    "Please enter a correction reason."
+                )
+                return
+
+            try:
+                update_manual_topup(
+                    topup_id=int(topup_id),
+                    corrected_by=user["username"],
+                    correction_reason=correction_reason,
+                    lines=corrected_lines,
+                )
+
+                st.session_state.pop(
+                    "linen_topup_edit_id",
+                    None
+                )
+
+                st.session_state[
+                    "topup_correction_success"
+                ] = True
+
+                st.session_state[
+                    "page"
+                ] = "linen_topup_edit"
+
+                st.rerun()
+
+            except ValueError as e:
+                st.warning(str(e))
+
+            except Exception as e:
+                st.error(
+                    f"Could not save correction: {e}"
+                )
+
+    with c2:
+        if st.button(
+            "Cancel",
+            use_container_width=True,
+            key=f"cancel_topup_correction_{topup_id}"
+        ):
+            st.session_state.pop(
+                "linen_topup_edit_id",
+                None
+            )
+
+            st.session_state[
+                "page"
+            ] = "linen_topup_edit"
+
+            st.rerun()
+
 # ---------------------------
 # Router
 # ---------------------------
@@ -4549,6 +4920,10 @@ def router():
         page_linen_manual_topup()
     elif page == "linen_topup_report":
         page_linen_topup_report()
+    elif page == "linen_topup_edit":
+        page_linen_topup_edit()
+    elif page == "linen_topup_edit_detail":
+        page_linen_topup_edit_detail()
     else:
         st.session_state["page"] = "login"
         page_login()

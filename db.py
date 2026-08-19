@@ -428,6 +428,25 @@ def init_db_postgres():
     )
     """)
 
+    # ---------------------------
+    # Manual Top Up correction audit fields
+    # ---------------------------
+
+    cur.execute("""
+        ALTER TABLE linen_topups
+        ADD COLUMN IF NOT EXISTS corrected_by TEXT
+    """)
+
+    cur.execute("""
+        ALTER TABLE linen_topups
+        ADD COLUMN IF NOT EXISTS corrected_at TIMESTAMP
+    """)
+
+    cur.execute("""
+        ALTER TABLE linen_topups
+        ADD COLUMN IF NOT EXISTS correction_reason TEXT
+    """)
+
     conn.commit()
     conn.close()
 
