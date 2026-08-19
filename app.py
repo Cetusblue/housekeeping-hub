@@ -2235,18 +2235,80 @@ def page_system_tools():
         except Exception as e:
             st.error(str(e))
 
-    if "manual_topup_qr_zip" in st.session_state:
-        st.download_button(
-            "Download QR Codes",
-            data=st.session_state["manual_topup_qr_zip"],
-            file_name="manual_topup_qr_codes.zip",
-            mime="application/zip",
-            use_container_width=True,
-        )
+    st.markdown("### Generate Single Manual Top Up QR")
 
-    if st.button("Back", use_container_width=True):
-        st.session_state["page"] = "home"
-        st.rerun()
+    single_qr_location = st.text_input(
+        "Location ID",
+        placeholder="e.g. LOC04100",
+        key="single_manual_topup_qr_location"
+    )
+
+    if st.button(
+        "Generate Single QR",
+        use_container_width=True,
+        key="generate_single_manual_topup_qr"
+    ):
+        location_id = single_qr_location.strip().upper()
+
+        location_map = get_linen_location_map()
+        location = location_map.get(location_id)
+
+        if not location:
+            st.error("Location ID not found.")
+
+        elif str(
+            location.get("manual_topup") or ""
+        ).strip().upper() != "Y":
+            st.error(
+                "This location is not enabled for Manual Top Up."
+            )
+
+        else:
+            try:
+                token = create_qr_token_for_location(
+                    location_id
+                )
+
+                qr_data = f"LTU:{token}"
+
+                qr = qrcode.make(qr_data)
+
+                img_buffer = BytesIO()
+                qr.save(
+                    img_buffer,
+                    format="PNG"
+                )
+                img_buffer.seek(0)
+
+                st.success(
+                    f"QR generated for {location_id}."
+                )
+
+                st.download_button(
+                    "Download QR",
+                    data=img_buffer.getvalue(),
+                    file_name=f"{location_id}.png",
+                    mime="image/png",
+                    use_container_width=True,
+                )
+
+            except Exception as e:
+                st.error(
+                    f"Could not generate QR: {e}"
+                )
+
+        if "manual_topup_qr_zip" in st.session_state:
+            st.download_button(
+                "Download QR Codes",
+                data=st.session_state["manual_topup_qr_zip"],
+                file_name="manual_topup_qr_codes.zip",
+                mime="application/zip",
+                use_container_width=True,
+            )
+
+        if st.button("Back", use_container_width=True):
+            st.session_state["page"] = "home"
+            st.rerun()
 
 def page_glo_gel_audit_detail():
     require_login()
