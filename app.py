@@ -42,9 +42,7 @@ from openpyxl.styles import Font, Alignment
 from io import BytesIO
 from datetime import datetime
 
-from report_db import get_half_year_report_data
-
-from report_db import get_half_year_report_data
+from report_db import get_half_year_report_data, get_app_k2_report_data
 
 from stock_db import (
     create_stock_in,
@@ -1519,6 +1517,60 @@ def _generate_half_year_report_excel(year: int, period_code: str):
                 ws.cell(row=excel_row, column=start_col + i, value=blank_if_zero(monthly_qty.get(month, 0)))
 
             excel_row += 1
+
+    # ---------------------------------------------------------
+    # For App K2 - derived from Stock In movements only
+    # ---------------------------------------------------------
+    k2_rows = get_app_k2_report_data(year, period_code)
+    k2_ws = wb.create_sheet(title="For App K2")
+
+    k2_ws["A1"] = "B. Breakdown of Consumables (Key Items) Delivery Order"
+    k2_ws["A2"] = f"For App K2 - {period_code} {year}"
+
+    k2_headers = [
+        "SN",
+        "Category",
+        "Description",
+        "Proposed Brand / Quality",
+        "Proposed UOM",
+        "Proposed Packaging per UOM",
+        "SOR",
+    ]
+    for col_idx, header in enumerate(k2_headers, start=1):
+        k2_ws.cell(row=4, column=col_idx, value=header)
+
+    k2_start_month_col = 8  # H
+    for i, header in enumerate(month_headers):
+        k2_ws.cell(row=4, column=k2_start_month_col + i, value=header)
+
+    k2_excel_row = 5
+    for row in k2_rows:
+        k2_ws.cell(k2_excel_row, 1, row["line_id"])
+        k2_ws.cell(k2_excel_row, 2, row["column_b"])
+        k2_ws.cell(k2_excel_row, 3, row["line_name"])
+        k2_ws.cell(k2_excel_row, 4, row["column_d"])
+        k2_ws.cell(k2_excel_row, 5, row["column_e"])
+        k2_ws.cell(k2_excel_row, 6, row["column_f"])
+        k2_ws.cell(k2_excel_row, 7, row["column_g"])
+
+        for i, month in enumerate(months):
+            qty = row["monthly_qty"].get(month, 0)
+            k2_ws.cell(
+                k2_excel_row,
+                k2_start_month_col + i,
+                blank_if_zero(qty)
+            )
+
+        k2_excel_row += 1
+
+    k2_ws.freeze_panes = "H5"
+    k2_ws.column_dimensions["A"].width = 8
+    k2_ws.column_dimensions["B"].width = 14
+    k2_ws.column_dimensions["C"].width = 42
+    k2_ws.column_dimensions["D"].width = 30
+    k2_ws.column_dimensions["E"].width = 14
+    k2_ws.column_dimensions["F"].width = 24
+    k2_ws.column_dimensions["G"].width = 12
 
     output = BytesIO()
     wb.save(output)

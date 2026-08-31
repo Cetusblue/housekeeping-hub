@@ -1,6 +1,8 @@
 from db import get_conn, ph
 from report_config import get_report_lines, get_report_line_id_for_item
-from master_loader import load_destinations_rows
+from master_loader import load_destinations_rows, MASTER_FILE
+from openpyxl import load_workbook
+from fractions import Fraction
 
 
 # ---------------------------
@@ -193,3 +195,167 @@ def get_half_year_report_data(year: int, period_code: str):
 
     return result
 
+
+
+# ---------------------------
+# App K2 report builder
+# ---------------------------
+def _parse_k2_conversion_factor(value):
+    """
+    Accepts normal numeric factors (1, 0.1, 12) and text fractions
+    such as '1/12'. Returns an exact Fraction where possible.
+    """
+    if value in (None, ""):
+        return Fraction(1, 1)
+
+    if isinstance(value, int):
+        return Fraction(value, 1)
+
+    if isinstance(value, float):
+        return Fraction(str(value))
+
+    text = str(value).strip()
+    try:
+        return Fraction(text)
+    except Exception as exc:
+        raise ValueError(f"Invalid App K2 conversion_factor: {value}") from exc
+
+
+def _load_app_k2_mapping_rows():
+    """Reads active rows from the 'App K2 Mapping' master-list sheet."""
+    wb = load_workbook(MASTER_FILE, data_only=True, read_only=True)
+    if "App K2 Mapping" not in wb.sheetnames:
+        wb.close()
+        raise ValueError("Sheet 'App K2 Mapping' not found in Master Lists.xlsx")
+
+    ws = wb["App K2 Mapping"]
+    headers = [str(c.value or "").strip() for c in ws[1]]
+    required = [
+        "app_K2_report_line_id",
+        "app_K2_report_line_name",
+        "item_name_for_app_K2",
+        "app_K2_for_column_b",
+        "app_K2_for_column_d",
+        "app_K2_for_column_e",
+        "app_K2_for_column_f",
+        "app_K2_for_column_G",
+        "conversion_factor",
+        "active",
+    ]
+    for col in required:
+        if col not in headers:
+            wb.close()
+            raise ValueError(f"Missing required column in App K2 Mapping: {col}")
+
+    idx = {name: headers.index(name) for name in headers}
+    rows = []
+
+    for values in ws.iter_rows(min_row=2, values_only=True):
+        active = str(values[idx["active"]] or "").strip().upper()
+        if active != "Y":
+            continue
+
+        line_id_raw = values[idx["app_K2_report_line_id"]]
+        if line_id_raw in (None, ""):
+            continue
+
+        try:
+            line_id = int(line_id_raw)
+        except Exception as exc:
+            wb.close()
+            raise ValueError(f"Invalid app_K2_report_line_id: {line_id_raw}") from exc
+
+        rows.append({
+            "line_id": line_id,
+            "line_name": str(values[idx["app_K2_report_line_name"]] or "").strip(),
+            "item_name": str(values[idx["item_name_for_app_K2"]] or "").strip(),
+            "column_b": str(values[idx["app_K2_for_column_b"]] or "").strip(),
+            "column_d": str(values[idx["app_K2_for_column_d"]] or "").strip(),
+            "column_e": str(values[idx["app_K2_for_column_e"]] or "").strip(),
+            "column_f": str(values[idx["app_K2_for_column_f"]] or "").strip(),
+            "column_g": values[idx["app_K2_for_column_G"]],
+            "factor": _parse_k2_conversion_factor(values[idx["conversion_factor"]]),
+        })
+
+    wb.close()
+    rows.sort(key=lambda x: x["line_id"])
+    return rows
+
+
+def get_app_k2_report_data(year: int, period_code: str):
+    """
+    Builds the 'For App K2' worksheet data from non-voided Stock In movements.
+
+    Multiple mapping rows may share the same App K2 line ID. Each source item's
+    Stock In quantity is converted first, then all contributions are summed.
+    """
+    months = get_half_year_months(period_code)
+    mapping_rows = _load_app_k2_mapping_rows()
+
+    conn = get_conn()
+    cur = conn.cursor()
+    query = f"""
+        SELECT item_name, qty, created_at
+        FROM stock_movements
+        WHERE movement_type = 'IN'
+          AND COALESCE(is_voided, FALSE) = FALSE
+          AND EXTRACT(YEAR FROM created_at::timestamp) = {ph()}
+    """
+    cur.execute(query, (year,))
+    movement_rows = cur.fetchall()
+    conn.close()
+
+    # item -> month -> exact integer stock-in quantity
+    item_month_totals = {}
+    for row in movement_rows:
+        created_at = row["created_at"]
+        if hasattr(created_at, "month"):
+            month = int(created_at.month)
+        else:
+            month = int(str(created_at)[5:7])
+
+        if month not in months:
+            continue
+
+        item_name = str(row["item_name"] or "").strip()
+        qty = int(row["qty"] or 0)
+        item_month_totals.setdefault(item_name, {m: 0 for m in months})
+        item_month_totals[item_name][month] += qty
+
+    # Preserve one output row per App K2 line ID while allowing many source items.
+    line_map = {}
+    for mapping in mapping_rows:
+        line_id = mapping["line_id"]
+        if line_id not in line_map:
+            line_map[line_id] = {
+                "line_id": line_id,
+                "line_name": mapping["line_name"],
+                "column_b": mapping["column_b"],
+                "column_d": mapping["column_d"],
+                "column_e": mapping["column_e"],
+                "column_f": mapping["column_f"],
+                "column_g": mapping["column_g"],
+                "monthly_qty": {m: Fraction(0, 1) for m in months},
+            }
+
+        item_name = mapping["item_name"]
+        if not item_name:
+            continue
+
+        source_totals = item_month_totals.get(item_name, {})
+        factor = mapping["factor"]
+        for month in months:
+            line_map[line_id]["monthly_qty"][month] += Fraction(
+                int(source_totals.get(month, 0)), 1
+            ) * factor
+
+    result = []
+    for line_id in sorted(line_map):
+        row = line_map[line_id]
+        display_monthly = {}
+        for month, qty in row["monthly_qty"].items():
+            display_monthly[month] = int(qty) if qty.denominator == 1 else float(qty)
+        row["monthly_qty"] = display_monthly
+        result.append(row)
+
+    return result
