@@ -4699,57 +4699,57 @@ def page_linen_manual_topup():
                 "classification": "COMMON",
             })
 
-            common_rows = [
-                row
-                for row in display_rows
-                if str(
-                    row.get("classification") or ""
-                ).upper() == "COMMON"
-            ]
-            uncommon_rows = [
-                row
-                for row in display_rows
-                if str(
-                    row.get("classification") or ""
-                ).upper() == "UNCOMMON"
-            ]
+        common_rows = [
+            row
+            for row in display_rows
+            if str(
+                row.get("classification") or ""
+            ).upper() == "COMMON"
+        ]
+        uncommon_rows = [
+            row
+            for row in display_rows
+            if str(
+                row.get("classification") or ""
+            ).upper() == "UNCOMMON"
+        ]
 
-            def render_manual_topup_rows(title, rows):
-                if not rows:
-                    return
+        def render_manual_topup_rows(title, rows):
+            if not rows:
+                return
 
-                st.subheader(title)
+            st.subheader(title)
 
-                for row in rows:
-                    norm = row.get("norm")
-                    label = row["name"]
-                    if norm is not None:
-                        label = f"{label} (Norm: {norm})"
+            for row in rows:
+                norm = row.get("norm")
+                label = row["name"]
+                if norm is not None:
+                    label = f"{label} (Norm: {norm})"
 
-                    if row["type"] == "ITEM":
-                        widget_key = (
-                            f"manual_topup_{active_location_id}_"
-                            f"item_{row['item_no']}"
-                        )
-                    else:
-                        widget_key = (
-                            f"manual_topup_{active_location_id}_"
-                            f"bundle_{row['bundle_id']}"
-                        )
-
-                    qty = st.number_input(
-                        label,
-                        min_value=0,
-                        step=1,
-                        value=0,
-                        key=widget_key
+                if row["type"] == "ITEM":
+                    widget_key = (
+                        f"manual_topup_{active_location_id}_"
+                        f"item_{row['item_no']}"
+                    )
+                else:
+                    widget_key = (
+                        f"manual_topup_{active_location_id}_"
+                        f"bundle_{row['bundle_id']}"
                     )
 
-                    entered_values.append({
-                        **row,
-                        "quantity": int(qty or 0),
-                        "widget_key": widget_key,
-                    })
+                qty = st.number_input(
+                    label,
+                    min_value=0,
+                    step=1,
+                    value=0,
+                    key=widget_key
+                )
+
+                entered_values.append({
+                    **row,
+                    "quantity": int(qty or 0),
+                    "widget_key": widget_key,
+                })
 
             render_manual_topup_rows(
                 "Common Items",
@@ -4775,6 +4775,7 @@ def page_linen_manual_topup():
                         entered_qty = int(
                             entered.get("quantity") or 0
                         )
+
                         if entered_qty <= 0:
                             continue
 
@@ -4784,6 +4785,7 @@ def page_linen_manual_topup():
                                 final_qty.get(item_no, 0)
                                 + entered_qty
                             )
+                            
                         else:
                             bundle_id = entered["bundle_id"]
                             bundle = bundle_map.get(bundle_id)
