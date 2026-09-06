@@ -31,6 +31,8 @@ from master_loader import (
     load_linen_master_rows,
     load_report_line_master_rows,
     load_report_mapping_rows,
+    get_linen_manual_config_for_location,
+    get_linen_bundle_map,
 )
 
 from admin_tools import reset_orders_only, reset_orders_and_movements
@@ -89,6 +91,7 @@ from linen_db import (
     get_assignments_for_user,
     get_submission,
     get_submission_lines,
+    get_submission_bundle_lines,
     save_submission_draft,
     submit_submission,
     get_submission_status_map,
@@ -265,39 +268,22 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    6/9/2026
+    - Linen Manual Top Up: Items now categorized by COMMON & UNCOMMON
+    - New locations added for Linen Manual Top Up & Linen Inventory
+    - Bundle Items now added for Linen Manual Top Up & Linen Inventory 
+    - Minor fixes to App K2 tab of Monthly Stock Report
+
+    31/8/2026
+    - Added App K2 for Monthly Report
+    - Revised linen items and locations 
+
     18/8/2026
     - Fixed a logic error for monthly stock report
     - Linen Manual Top-Up System is now live
 
     12/8/2026
-    Beta-Testing: Linen Manual Top-Up System
-
-    28/7/2026 *MAJOR UPDATE*
-    Order Management:
-    - Added Close Order function for partially fulfilled orders. (STORE)
-    - Orders that cannot be completed due to reasons such as insufficient stock can now be properly closed instead of remaining partially issued.
-    - Closure reason is recorded for future referencing and reporting where necessary.
-
-    Order History:
-    - TEAM & STORE users now view current month + previous month orders by default, making the order list cleaner and easier to navigate.
-    - ADMIN will still view the full order history.
-
-    Stock Card:
-    - Improved worksheet organization.
-    - Report-related items are now grouped more logically.
-    - Report-tabs are highlighted for easier identification.
-
-    Login Experience:
-    - Added "Keep me logged in" option.
-    - Users can remain signed in on their own devices, reducing the need to log in repeatedly after refreshing the browser or reconnecting.
-
-    Issue Stock:
-    - Added Issue History.
-    - The Issue Stock page now displays the 10 most recent stock issuances, allowing STORE personnel to review stock issuance without generating a report (or calling me 😂)
-
-    Performance Improvements:
-    - Optimized database performance for faster page loading and smoother navigation.
-    - Reduced loading times across various modules, particularly during inventory and stock operations.      
+    Beta-Testing: Linen Manual Top-Up System   
 
     """)
 
@@ -3746,7 +3732,9 @@ def page_linen_count():
 
     user = st.session_state["user"]
 
-    location_id = st.session_state.get("linen_count_location_id")
+    location_id = st.session_state.get(
+        "linen_count_location_id"
+    )
 
     if not location_id:
         st.warning("No linen location selected.")
@@ -3777,6 +3765,10 @@ def page_linen_count():
 
     active_cycle = get_active_linen_cycle()
 
+    if not active_cycle:
+        st.warning("No active linen inventory.")
+        return
+
     saved_submission = get_submission(
         active_cycle["id"],
         location_id
@@ -3789,56 +3781,270 @@ def page_linen_count():
             saved_submission["status"] == "SUBMITTED"
         )
 
+    # =========================================================
+    # Existing saved individual quantities
+    # =========================================================
     saved_qty_map = {}
 
     if saved_submission:
-
         saved_lines = get_submission_lines(
             saved_submission["id"]
         )
 
         saved_qty_map = {
-            row["item_no"]: row["quantity"]
+            str(row["item_no"]):
+            int(row["quantity"] or 0)
             for row in saved_lines
         }
 
-    items = get_linen_items_for_location(location_id)
+    # =========================================================
+    # Existing saved bundle quantities
+    # =========================================================
+    saved_bundle_qty_map = {}
+    saved_bundle_rows = []
 
-    if not items:
-        st.warning("No linen items configured for this location.")
-
-    else:
-
-        st.subheader("Items to Count")
-
-        count_lines = []
-
-        can_edit = (
-            not is_submitted
-            or user["role"] in ("LINTEAM", "LINSUP", "ADMIN")
+    if saved_submission:
+        saved_bundle_rows = (
+            get_submission_bundle_lines(
+                saved_submission["id"]
+            )
         )
 
-        for item in items:
+        saved_bundle_qty_map = {
+            str(row["bundle_id"]):
+            int(row["quantity"] or 0)
+            for row in saved_bundle_rows
+        }
 
-            qty = st.number_input(
-                item["item_name"],
+    # =========================================================
+    # Normal Linen Master items
+    # =========================================================
+    items = get_linen_items_for_location(
+        location_id
+    )
+
+    if not items:
+        st.warning(
+            "No linen items configured for this location."
+        )
+        return
+
+    # =========================================================
+    # Bundle configuration
+    # =========================================================
+    configured_bundle_ids = (
+        get_inventory_bundle_ids_for_location(
+            location_id
+        )
+    )
+
+    bundle_map = get_linen_bundle_map()
+
+    # Validate bundle definitions.
+    valid_bundle_ids = []
+
+    for bundle_id in configured_bundle_ids:
+        if bundle_id not in bundle_map:
+            st.error(
+                f"Bundle '{bundle_id}' is configured for this "
+                f"location but is not defined in Linen Bundle Mapping."
+            )
+            return
+
+        valid_bundle_ids.append(bundle_id)
+
+    # =========================================================
+    # Backward compatibility
+    # =========================================================
+    #
+    # Old inventory submissions existed before bundle storage.
+    # If an old submission has no saved bundle rows, keep showing
+    # its component items individually so we never accidentally
+    # reinterpret or destroy an existing count.
+    #
+    # New submissions save a row for every configured bundle,
+    # even where its quantity is zero.
+    # =========================================================
+    use_bundle_mode = bool(valid_bundle_ids)
+
+    if (
+        saved_submission
+        and valid_bundle_ids
+        and not saved_bundle_rows
+    ):
+        use_bundle_mode = False
+
+        st.info(
+            "This entry was created before bundle counting was "
+            "introduced. Existing component items are shown "
+            "individually for this submission."
+        )
+
+    # =========================================================
+    # Determine which component items bundles replace
+    # =========================================================
+    bundled_component_item_nos = set()
+
+    if use_bundle_mode:
+        for bundle_id in valid_bundle_ids:
+            bundle = bundle_map[bundle_id]
+
+            for component in bundle["components"]:
+                bundled_component_item_nos.add(
+                    str(component["item_no"])
+                )
+
+    # Anything not consumed by a bundle remains an ordinary
+    # Linen Inventory item.
+    singular_items = [
+        item
+        for item in items
+        if str(item["item_no"])
+        not in bundled_component_item_nos
+    ]
+
+    st.subheader("Items to Count")
+
+    can_edit = (
+        not is_submitted
+        or user["role"]
+        in ("LINTEAM", "LINSUP", "ADMIN")
+    )
+
+    # Final component quantities that will be saved into the
+    # existing linen_submission_lines table.
+    count_lines = []
+
+    # Raw bundle quantities entered by staff.
+    bundle_lines = []
+
+    # =========================================================
+    # Bundle inputs
+    # =========================================================
+    if use_bundle_mode and valid_bundle_ids:
+
+        st.markdown("### Packs")
+
+        for bundle_id in valid_bundle_ids:
+            bundle = bundle_map[bundle_id]
+
+            bundle_qty = st.number_input(
+                bundle["bundle_name"],
                 min_value=0,
                 step=1,
                 value=int(
-                    saved_qty_map.get(
-                        item["item_no"],
+                    saved_bundle_qty_map.get(
+                        bundle_id,
                         0
                     )
                 ),
                 disabled=not can_edit,
-                key=f"linen_count_{location_id}_{item['item_no']}"
+                key=(
+                    f"linen_bundle_"
+                    f"{location_id}_"
+                    f"{bundle_id}"
+                )
             )
 
-            count_lines.append({
-                "item_no": item["item_no"],
-                "quantity": qty
+            bundle_lines.append({
+                "bundle_id": bundle_id,
+                "quantity": int(
+                    bundle_qty or 0
+                ),
             })
 
+    # =========================================================
+    # Ordinary / non-bundled items
+    # =========================================================
+    if use_bundle_mode and valid_bundle_ids:
+        st.markdown("### Individual Items")
+
+    for item in singular_items:
+
+        item_no = str(
+            item["item_no"]
+        )
+
+        qty = st.number_input(
+            item["item_name"],
+            min_value=0,
+            step=1,
+            value=int(
+                saved_qty_map.get(
+                    item_no,
+                    0
+                )
+            ),
+            disabled=not can_edit,
+            key=(
+                f"linen_count_"
+                f"{location_id}_"
+                f"{item_no}"
+            )
+        )
+
+        count_lines.append({
+            "item_no": item_no,
+            "quantity": int(qty or 0),
+        })
+
+    # =========================================================
+    # Expand bundles into actual Linen Master items
+    # =========================================================
+    if use_bundle_mode:
+
+        expanded_component_qty = {}
+
+        for bundle_line in bundle_lines:
+            bundle_id = bundle_line[
+                "bundle_id"
+            ]
+
+            bundle_qty = int(
+                bundle_line["quantity"]
+                or 0
+            )
+
+            bundle = bundle_map[bundle_id]
+
+            for component in bundle[
+                "components"
+            ]:
+
+                item_no = str(
+                    component["item_no"]
+                )
+
+                qty_per_set = int(
+                    component["qty_per_set"]
+                )
+
+                expanded_component_qty[
+                    item_no
+                ] = (
+                    expanded_component_qty.get(
+                        item_no,
+                        0
+                    )
+                    + (
+                        bundle_qty
+                        * qty_per_set
+                    )
+                )
+
+        # Save every bundled component as its actual Linen
+        # Master item. Bundle names never enter the report data.
+        for item_no, quantity in (
+            expanded_component_qty.items()
+        ):
+            count_lines.append({
+                "item_no": item_no,
+                "quantity": int(quantity),
+            })
+
+    # =========================================================
+    # Save / Submit
+    # =========================================================
     if can_edit:
 
         col1, col2 = st.columns(2)
@@ -3854,10 +4060,12 @@ def page_linen_count():
                     active_cycle["id"],
                     location_id,
                     user["username"],
-                    count_lines
+                    count_lines,
+                    bundle_lines=bundle_lines
                 )
 
                 st.success("Draft saved.")
+                st.rerun()
 
         with col2:
 
@@ -3867,24 +4075,36 @@ def page_linen_count():
                 key=f"submit_linen_count_{location_id}"
             ):
 
-                latest_submission = get_submission(
-                    active_cycle["id"],
-                    location_id
+                latest_submission = (
+                    get_submission(
+                        active_cycle["id"],
+                        location_id
+                    )
                 )
 
                 if (
                     latest_submission
-                    and latest_submission["status"] == "SUBMITTED"
-                    and user["role"] not in ("LINTEAM", "LINSUP", "ADMIN")
+                    and latest_submission[
+                        "status"
+                    ] == "SUBMITTED"
+                    and user["role"] not in (
+                        "LINTEAM",
+                        "LINSUP",
+                        "ADMIN"
+                    )
                 ):
-                    st.warning("This location has already been submitted by another user.")
+                    st.warning(
+                        "This location has already been "
+                        "submitted by another user."
+                    )
                     st.stop()
 
                 save_submission_draft(
                     active_cycle["id"],
                     location_id,
                     user["username"],
-                    count_lines
+                    count_lines,
+                    bundle_lines=bundle_lines
                 )
 
                 submit_submission(
@@ -3895,11 +4115,19 @@ def page_linen_count():
 
                 st.success("Count submitted.")
                 st.rerun()
-    else:
-        st.info("This count has been submitted and locked.")
 
-    if st.button("Back", use_container_width=True):
-        st.session_state["page"] = "linen_inventory"
+    else:
+        st.info(
+            "This count has been submitted and locked."
+        )
+
+    if st.button(
+        "Back",
+        use_container_width=True
+    ):
+        st.session_state[
+            "page"
+        ] = "linen_inventory"
         st.rerun()
 
 def generate_linen_report_excel(cycle_id):
@@ -4313,67 +4541,252 @@ def page_linen_manual_topup():
     )
 
     # ---------------------------
-    # Load location items
+    # Load Manual Top Up config
     # ---------------------------
-    items = get_linen_items_for_location(
+    config_rows = get_linen_manual_config_for_location(
         active_location_id
     )
 
-    if not items:
+    bundle_map = get_linen_bundle_map()
+
+    if not config_rows:
         st.warning(
-            "No linen items configured for this location."
+            "No Manual Top Up configuration found for this location."
         )
 
     else:
-        st.subheader("Top Up Quantities")
+        # -----------------------------------------------------
+        # Build display rows.
+        #
+        # Singular items stay singular.
+        # Multiple component rows sharing one bundle_id become
+        # one visible bundle input.
+        # -----------------------------------------------------
+        display_rows = []
+        seen_bundles = set()
 
-        topup_lines = []
+        for row in config_rows:
+            bundle_id = str(
+                row.get("bundle_id") or ""
+            ).strip()
 
-        for item in items:
-            widget_key = (
-                f"manual_topup_"
-                f"{active_location_id}_"
-                f"{item['item_no']}"
-            )
+            if bundle_id:
+                if bundle_id in seen_bundles:
+                    continue
 
-            qty = st.number_input(
-                item["item_name"],
-                min_value=0,
-                step=1,
-                value=0,
-                key=widget_key
-            )
+                bundle = bundle_map.get(bundle_id)
 
-            topup_lines.append({
-                "item_no": item["item_no"],
-                "quantity": int(qty or 0),
-            })
+                if not bundle:
+                    st.error(
+                        f"Bundle '{bundle_id}' is not defined "
+                        f"in Linen Bundle Mapping."
+                    )
+                    return
 
-        # ---------------------------
+                seen_bundles.add(bundle_id)
+
+                display_rows.append({
+                    "type": "BUNDLE",
+                    "bundle_id": bundle_id,
+                    "name": bundle["bundle_name"],
+                    "norm": row.get("norm"),
+                    "classification": row.get(
+                        "classification",
+                        "UNCOMMON"
+                    ),
+                })
+
+            else:
+                display_rows.append({
+                    "type": "ITEM",
+                    "item_no": str(row["item_no"]),
+                    "name": row["item_name"],
+                    "norm": row.get("norm"),
+                    "classification": row.get(
+                        "classification",
+                        "UNCOMMON"
+                    ),
+                })
+
+        # -----------------------------------------------------
+        # Common first, then Uncommon
+        # -----------------------------------------------------
+        common_rows = [
+            row
+            for row in display_rows
+            if str(
+                row.get("classification") or ""
+            ).upper() == "COMMON"
+        ]
+
+        uncommon_rows = [
+            row
+            for row in display_rows
+            if str(
+                row.get("classification") or ""
+            ).upper() == "UNCOMMON"
+        ]
+
+        entered_values = []
+
+        def render_manual_topup_rows(
+            title,
+            rows
+        ):
+            if not rows:
+                return
+
+            st.subheader(title)
+
+            for row in rows:
+                norm = row.get("norm")
+
+                if norm is None:
+                    label = row["name"]
+                else:
+                    label = (
+                        f"{row['name']} "
+                        f"(Norm: {norm})"
+                    )
+
+                if row["type"] == "ITEM":
+                    widget_key = (
+                        f"manual_topup_"
+                        f"{active_location_id}_"
+                        f"item_{row['item_no']}"
+                    )
+
+                else:
+                    widget_key = (
+                        f"manual_topup_"
+                        f"{active_location_id}_"
+                        f"bundle_{row['bundle_id']}"
+                    )
+
+                qty = st.number_input(
+                    label,
+                    min_value=0,
+                    step=1,
+                    value=0,
+                    key=widget_key
+                )
+
+                entered_values.append({
+                    **row,
+                    "quantity": int(qty or 0),
+                    "widget_key": widget_key,
+                })
+
+        render_manual_topup_rows(
+            "Common Items",
+            common_rows
+        )
+
+        render_manual_topup_rows(
+            "Uncommon Items",
+            uncommon_rows
+        )
+
+        # -----------------------------------------------------
         # Submit
-        # ---------------------------
+        # -----------------------------------------------------
         if st.button(
             "Submit Top Up",
             use_container_width=True,
             key=f"submit_manual_topup_{active_location_id}"
         ):
             try:
+                # item_no -> final quantity
+                final_qty = {}
+
+                for entered in entered_values:
+                    entered_qty = int(
+                        entered.get("quantity") or 0
+                    )
+
+                    if entered_qty <= 0:
+                        continue
+
+                    # -----------------------------
+                    # Singular item
+                    # -----------------------------
+                    if entered["type"] == "ITEM":
+                        item_no = str(
+                            entered["item_no"]
+                        )
+
+                        final_qty[item_no] = (
+                            final_qty.get(
+                                item_no,
+                                0
+                            )
+                            + entered_qty
+                        )
+
+                    # -----------------------------
+                    # Bundle
+                    # -----------------------------
+                    elif entered["type"] == "BUNDLE":
+                        bundle_id = entered[
+                            "bundle_id"
+                        ]
+
+                        bundle = bundle_map.get(
+                            bundle_id
+                        )
+
+                        if not bundle:
+                            raise ValueError(
+                                f"Bundle '{bundle_id}' "
+                                f"is not defined."
+                            )
+
+                        for component in bundle[
+                            "components"
+                        ]:
+                            item_no = str(
+                                component["item_no"]
+                            )
+
+                            multiplier = int(
+                                component[
+                                    "qty_per_set"
+                                ]
+                            )
+
+                            expanded_qty = (
+                                entered_qty
+                                * multiplier
+                            )
+
+                            final_qty[item_no] = (
+                                final_qty.get(
+                                    item_no,
+                                    0
+                                )
+                                + expanded_qty
+                            )
+
+                topup_lines = [
+                    {
+                        "item_no": item_no,
+                        "quantity": qty,
+                    }
+                    for item_no, qty
+                    in final_qty.items()
+                    if qty > 0
+                ]
+
                 create_manual_topup(
                     location_id=active_location_id,
                     created_by=user["username"],
                     lines=topup_lines,
                 )
 
-                # Clear quantity fields.
-                for item in items:
-                    widget_key = (
-                        f"manual_topup_"
-                        f"{active_location_id}_"
-                        f"{item['item_no']}"
-                    )
-
+                # Clear all visible input widgets.
+                for entered in entered_values:
                     st.session_state.pop(
-                        widget_key,
+                        entered["widget_key"],
                         None
                     )
 
@@ -4383,7 +4796,7 @@ def page_linen_manual_topup():
                     None
                 )
 
-                # Force a fresh scanner instance.
+                # Force fresh scanner.
                 st.session_state[
                     "manual_topup_scan_nonce"
                 ] += 1
@@ -4413,15 +4826,9 @@ def page_linen_manual_topup():
         key="manual_topup_scan_another"
     ):
 
-        for item in items:
-            widget_key = (
-                f"manual_topup_"
-                f"{active_location_id}_"
-                f"{item['item_no']}"
-            )
-
+        for entered in entered_values:
             st.session_state.pop(
-                widget_key,
+                entered["widget_key"],
                 None
             )
 

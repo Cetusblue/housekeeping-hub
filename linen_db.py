@@ -244,8 +244,12 @@ def save_submission_draft(
     cycle_id,
     location_id,
     submitted_by,
-    lines
+    lines,
+    bundle_lines=None
 ):
+    if bundle_lines is None:
+        bundle_lines = []
+    
     conn = get_conn()
     cur = conn.cursor()
 
@@ -267,6 +271,11 @@ def save_submission_draft(
 
         cur.execute("""
             DELETE FROM linen_submission_lines
+            WHERE submission_id = %s
+        """, (submission_id,))
+
+        cur.execute("""
+            DELETE FROM linen_submission_bundle_lines
             WHERE submission_id = %s
         """, (submission_id,))
 
@@ -317,6 +326,27 @@ def save_submission_draft(
             int(line["quantity"] or 0)
         ))
 
+    for bundle_line in bundle_lines:
+        qty = int(
+            bundle_line.get("quantity") or 0
+        )
+
+        if qty <= 0:
+            continue
+
+        cur.execute("""
+            INSERT INTO linen_submission_bundle_lines (
+                submission_id,
+                bundle_id,
+                quantity
+            )
+            VALUES (%s, %s, %s)
+        """, (
+            submission_id,
+            str(bundle_line["bundle_id"]),
+            qty,
+        ))
+
     conn.commit()
     conn.close()
 
@@ -327,6 +357,24 @@ def get_submission_lines(submission_id):
     cur.execute("""
         SELECT *
         FROM linen_submission_lines
+        WHERE submission_id = %s
+    """, (submission_id,))
+
+    rows = cur.fetchall()
+
+    conn.close()
+
+    return [dict(r) for r in rows]
+
+def get_submission_bundle_lines(submission_id):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            bundle_id,
+            quantity
+        FROM linen_submission_bundle_lines
         WHERE submission_id = %s
     """, (submission_id,))
 
