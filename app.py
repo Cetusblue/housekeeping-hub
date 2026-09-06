@@ -33,6 +33,7 @@ from master_loader import (
     load_report_mapping_rows,
     get_linen_manual_config_for_location,
     get_linen_bundle_map,
+    get_manual_bundle_ids_for_location,
     get_inventory_bundle_ids_for_location,
 )
 
@@ -4660,6 +4661,39 @@ def page_linen_manual_topup():
                         "UNCOMMON"
                     ),
                 })
+
+    # -----------------------------------------------------
+    # Add location-level Manual Top Up bundles.
+    #   
+    # These do not need their component items to appear
+    # in Linen Manual Config.
+    # -----------------------------------------------------
+    for bundle_id in manual_bundle_ids:
+
+        # Avoid displaying the same bundle twice if it was
+        # already introduced through Linen Manual Config.
+        if bundle_id in seen_bundles:
+            continue
+
+        bundle = bundle_map.get(bundle_id)
+
+        if not bundle:
+            st.error(
+                f"Bundle '{bundle_id}' is configured for "
+                f"this location but is not defined in "
+                f"Linen Bundle Mapping."
+            )
+            return
+
+        seen_bundles.add(bundle_id)
+
+        display_rows.append({
+            "type": "BUNDLE",
+            "bundle_id": bundle_id,
+            "name": bundle["bundle_name"],
+            "norm": None,
+            "classification": "COMMON",
+        })
 
         common_rows = [
             row

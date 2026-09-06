@@ -908,6 +908,64 @@ def load_linen_inventory_bundle_rows():
         })
 
     return rows
+
+@st.cache_data
+def load_linen_manual_bundle_rows():
+    wb = _open_workbook()
+
+    if "Linen Manual Bundle" not in wb.sheetnames:
+        raise ValueError(
+            "Sheet 'Linen Manual Bundle' not found in Master Lists.xlsx"
+        )
+
+    ws = wb["Linen Manual Bundle"]
+
+    headers = [
+        _normalize_text(cell.value)
+        for cell in ws[1]
+    ]
+
+    required = [
+        "location_id",
+        "bundle_id",
+    ]
+
+    for col in required:
+        if col not in headers:
+            raise ValueError(
+                f"Missing required column in "
+                f"Linen Manual Bundle: {col}"
+            )
+
+    idx = {
+        name: headers.index(name)
+        for name in headers
+    }
+
+    rows = []
+
+    for row in ws.iter_rows(
+        min_row=2,
+        values_only=True
+    ):
+        location_id = _normalize_text(
+            row[idx["location_id"]]
+        )
+
+        bundle_id = _normalize_text(
+            row[idx["bundle_id"]]
+        )
+
+        if not location_id or not bundle_id:
+            continue
+
+        rows.append({
+            "location_id": location_id,
+            "bundle_id": bundle_id,
+        })
+
+    return rows
+
 def get_linen_manual_config_for_location(
     location_id
 ):
@@ -956,5 +1014,14 @@ def get_inventory_bundle_ids_for_location(
     return [
         row["bundle_id"]
         for row in load_linen_inventory_bundle_rows()
+        if row["location_id"] == location_id
+    ]
+
+def get_manual_bundle_ids_for_location(
+    location_id
+):
+    return [
+        row["bundle_id"]
+        for row in load_linen_manual_bundle_rows()
         if row["location_id"] == location_id
     ]
