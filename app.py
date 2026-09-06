@@ -4543,70 +4543,168 @@ def page_linen_manual_topup():
     # ---------------------------
     # Load Manual Top Up config
     # ---------------------------
+    entered_values = []
+    
     config_rows = get_linen_manual_config_for_location(
         active_location_id
     )
 
     bundle_map = get_linen_bundle_map()
 
+    config_rows = get_linen_manual_config_for_location(
+        active_location_id
+    )
+
+    bundle_map = get_linen_bundle_map()
+
+    # -----------------------------------------------------
+    # Fallback for locations without Manual Config.
+    #
+    # These locations continue using their ordinary
+    # Linen Master item list exactly as before.
+    # -----------------------------------------------------
     if not config_rows:
-        st.warning(
-            "No Manual Top Up configuration found for this location."
+        items = get_linen_items_for_location(
+            active_location_id
         )
 
+    if not items:
+        st.warning(
+            "No linen items configured for this location."
+        )
     else:
-        # -----------------------------------------------------
-        # Build display rows.
-        #
-        # Singular items stay singular.
-        # Multiple component rows sharing one bundle_id become
-        # one visible bundle input.
-        # -----------------------------------------------------
-        display_rows = []
-        seen_bundles = set()
+        st.subheader("Top Up Quantities")
 
-        for row in config_rows:
-            bundle_id = str(
-                row.get("bundle_id") or ""
-            ).strip()
+        for item in items:
+            item_no = str(item["item_no"])
 
-            if bundle_id:
-                if bundle_id in seen_bundles:
-                    continue
+            widget_key = (
+                f"manual_topup_"
+                f"{active_location_id}_"
+                f"item_{item_no}"
+            )
 
-                bundle = bundle_map.get(bundle_id)
+            qty = st.number_input(
+                item["item_name"],
+                min_value=0,
+                step=1,
+                value=0,
+                key=widget_key
+            )
 
-                if not bundle:
-                    st.error(
-                        f"Bundle '{bundle_id}' is not defined "
-                        f"in Linen Bundle Mapping."
+            entered_values.append({
+                "type": "ITEM",
+                "item_no": item_no,
+                "name": item["item_name"],
+                "norm": None,
+                "classification": None,
+                "quantity": int(qty or 0),
+                "widget_key": widget_key,
+            })
+
+        if st.button(
+            "Submit Top Up",
+            use_container_width=True,
+            key=f"submit_manual_topup_{active_location_id}"
+        ):
+            try:
+                topup_lines = [
+                    {
+                        "item_no": entered["item_no"],
+                        "quantity": entered["quantity"],
+                    }
+                    for entered in entered_values
+                    if entered["quantity"] > 0
+                ]
+
+                create_manual_topup(
+                    location_id=active_location_id,
+                    created_by=user["username"],
+                    lines=topup_lines,
+                )
+
+                for entered in entered_values:
+                    st.session_state.pop(
+                        entered["widget_key"],
+                        None
                     )
-                    return
 
-                seen_bundles.add(bundle_id)
+                st.session_state.pop(
+                    "manual_topup_location_id",
+                    None
+                )
 
-                display_rows.append({
-                    "type": "BUNDLE",
-                    "bundle_id": bundle_id,
-                    "name": bundle["bundle_name"],
-                    "norm": row.get("norm"),
-                    "classification": row.get(
-                        "classification",
-                        "UNCOMMON"
-                    ),
-                })
+                st.session_state[
+                    "manual_topup_scan_nonce"
+                ] += 1
 
-            else:
-                display_rows.append({
-                    "type": "ITEM",
-                    "item_no": str(row["item_no"]),
-                    "name": row["item_name"],
-                    "norm": row.get("norm"),
-                    "classification": row.get(
-                        "classification",
-                        "UNCOMMON"
-                    ),
-                })
+                st.session_state[
+                    "manual_topup_success"
+                ] = True
+
+                st.rerun()
+
+            except ValueError as e:
+                st.warning(str(e))
+
+            except Exception as e:
+                st.error(
+                    f"Could not save Manual Top Up: {e}"
+                )
+
+        else:
+    # -----------------------------------------------------
+    # Build display rows.
+    #
+    # Singular items stay singular.
+    # Multiple component rows sharing one bundle_id become
+    # one visible bundle input.
+    # -----------------------------------------------------
+            display_rows = []
+            seen_bundles = set()
+
+            for row in config_rows:
+                bundle_id = str(
+                    row.get("bundle_id") or ""
+                ).strip()
+
+                if bundle_id:
+                    if bundle_id in seen_bundles:
+                        continue
+
+                    bundle = bundle_map.get(bundle_id)
+
+                    if not bundle:
+                        st.error(
+                            f"Bundle '{bundle_id}' is not defined "
+                            f"in Linen Bundle Mapping."
+                        )
+                        return
+
+                    seen_bundles.add(bundle_id)
+
+                    display_rows.append({
+                        "type": "BUNDLE",
+                        "bundle_id": bundle_id,
+                        "name": bundle["bundle_name"],
+                        "norm": row.get("norm"),
+                        "classification": row.get(
+                            "classification",
+                            "UNCOMMON"
+                        ),
+                    })
+
+                else:
+                    display_rows.append({
+                        "type": "ITEM",
+                        "item_no": str(row["item_no"]),
+                        "name": row["item_name"],
+                        "norm": row.get("norm"),
+                        "classification": row.get(
+                            "classification",
+                            "UNCOMMON"
+                        ),
+                    })
 
         # -----------------------------------------------------
         # Common first, then Uncommon
