@@ -4528,6 +4528,10 @@ def page_linen_manual_topup():
     )
     bundle_map = get_linen_bundle_map()
 
+    manual_bundle_ids = get_manual_bundle_ids_for_location(
+        active_location_id
+    )
+
     # =========================================================
     # FALLBACK — locations not present in Linen Manual Config
     # =========================================================
