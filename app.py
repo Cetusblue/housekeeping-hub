@@ -4436,14 +4436,9 @@ def page_linen_manual_topup():
         "manual_topup_location_id"
     )
 
-    # =========================================================
-    # STEP 1 — SCAN LOCATION
-    # =========================================================
     if not active_location_id:
         st.subheader("Scan Location")
-        st.caption(
-            "Point the camera at the Manual Top Up QR code."
-        )
+        st.caption("Point the camera at the Manual Top Up QR code.")
 
         scanned = qrcode_scanner(
             key=(
@@ -4456,9 +4451,7 @@ def page_linen_manual_topup():
             scanned = str(scanned).strip()
 
             if not scanned.startswith("LTU:"):
-                st.error(
-                    "Invalid QR code. Please scan a Manual Top Up QR code."
-                )
+                st.error("Invalid QR code. Please scan a Manual Top Up QR code.")
             else:
                 raw_token = scanned[4:].strip()
                 location_id = resolve_qr_token(raw_token)
@@ -4471,16 +4464,10 @@ def page_linen_manual_topup():
 
                     if not location:
                         st.error("Location could not be found.")
-                    elif str(
-                        location.get("manual_topup", "")
-                    ).strip().upper() != "Y":
-                        st.error(
-                            "This location is not configured for Manual Top Up."
-                        )
+                    elif str(location.get("manual_topup", "")).strip().upper() != "Y":
+                        st.error("This location is not configured for Manual Top Up.")
                     else:
-                        st.session_state[
-                            "manual_topup_location_id"
-                        ] = location_id
+                        st.session_state["manual_topup_location_id"] = location_id
                         st.rerun()
 
         st.divider()
@@ -4495,9 +4482,6 @@ def page_linen_manual_topup():
 
         return
 
-    # =========================================================
-    # STEP 2 — LOCATION FOUND
-    # =========================================================
     location_map = get_linen_location_map()
     location = location_map.get(active_location_id)
 
@@ -4519,39 +4503,24 @@ def page_linen_manual_topup():
     st.markdown(f"### {location_display}")
     st.caption(f"Location ID: {active_location_id}")
 
-    # Always initialise this so Scan Another Location is safe
-    # whether the location uses Manual Config or fallback mode.
     entered_values = []
 
-    config_rows = get_linen_manual_config_for_location(
-        active_location_id
-    )
+    config_rows = get_linen_manual_config_for_location(active_location_id)
     bundle_map = get_linen_bundle_map()
+    manual_bundle_ids = get_manual_bundle_ids_for_location(active_location_id)
 
-    manual_bundle_ids = get_manual_bundle_ids_for_location(
-        active_location_id
-    )
-
-    # =========================================================
-    # FALLBACK — locations not present in Linen Manual Config
-    # =========================================================
     if not config_rows:
-        items = get_linen_items_for_location(
-            active_location_id
-        )
+        items = get_linen_items_for_location(active_location_id)
 
         if not items:
-            st.warning(
-                "No linen items configured for this location."
-            )
+            st.warning("No linen items configured for this location.")
         else:
             st.subheader("Top Up Quantities")
 
             for item in items:
                 item_no = str(item["item_no"])
                 widget_key = (
-                    f"manual_topup_{active_location_id}_"
-                    f"item_{item_no}"
+                    f"manual_topup_{active_location_id}_item_{item_no}"
                 )
 
                 qty = st.number_input(
@@ -4573,10 +4542,7 @@ def page_linen_manual_topup():
             if st.button(
                 "Submit Top Up",
                 use_container_width=True,
-                key=(
-                    "submit_manual_topup_fallback_"
-                    f"{active_location_id}"
-                )
+                key=f"submit_manual_topup_fallback_{active_location_id}"
             ):
                 try:
                     topup_lines = [
@@ -4595,41 +4561,24 @@ def page_linen_manual_topup():
                     )
 
                     for entered in entered_values:
-                        st.session_state.pop(
-                            entered["widget_key"],
-                            None
-                        )
+                        st.session_state.pop(entered["widget_key"], None)
 
-                    st.session_state.pop(
-                        "manual_topup_location_id",
-                        None
-                    )
-                    st.session_state[
-                        "manual_topup_scan_nonce"
-                    ] += 1
-                    st.session_state[
-                        "manual_topup_success"
-                    ] = True
+                    st.session_state.pop("manual_topup_location_id", None)
+                    st.session_state["manual_topup_scan_nonce"] += 1
+                    st.session_state["manual_topup_success"] = True
                     st.rerun()
 
                 except ValueError as e:
                     st.warning(str(e))
                 except Exception as e:
-                    st.error(
-                        f"Could not save Manual Top Up: {e}"
-                    )
+                    st.error(f"Could not save Manual Top Up: {e}")
 
-    # =========================================================
-    # CONFIGURED — Norm / Common-Uncommon / bundle support
-    # =========================================================
     else:
         display_rows = []
         seen_bundles = set()
 
         for row in config_rows:
-            bundle_id = str(
-                row.get("bundle_id") or ""
-            ).strip()
+            bundle_id = str(row.get("bundle_id") or "").strip()
 
             if bundle_id:
                 if bundle_id in seen_bundles:
@@ -4638,8 +4587,7 @@ def page_linen_manual_topup():
                 bundle = bundle_map.get(bundle_id)
                 if not bundle:
                     st.error(
-                        f"Bundle '{bundle_id}' is not defined "
-                        "in Linen Bundle Mapping."
+                        f"Bundle '{bundle_id}' is not defined in Linen Bundle Mapping."
                     )
                     return
 
@@ -4649,10 +4597,7 @@ def page_linen_manual_topup():
                     "bundle_id": bundle_id,
                     "name": bundle["bundle_name"],
                     "norm": row.get("norm"),
-                    "classification": row.get(
-                        "classification",
-                        "UNCOMMON"
-                    ),
+                    "classification": row.get("classification", "UNCOMMON"),
                 })
             else:
                 display_rows.append({
@@ -4660,22 +4605,10 @@ def page_linen_manual_topup():
                     "item_no": str(row["item_no"]),
                     "name": row["item_name"],
                     "norm": row.get("norm"),
-                    "classification": row.get(
-                        "classification",
-                        "UNCOMMON"
-                    ),
+                    "classification": row.get("classification", "UNCOMMON"),
                 })
 
-    # -----------------------------------------------------
-    # Add location-level Manual Top Up bundles.
-    #   
-    # These do not need their component items to appear
-    # in Linen Manual Config.
-    # -----------------------------------------------------
         for bundle_id in manual_bundle_ids:
-
-            # Avoid displaying the same bundle twice if it was
-            # already introduced through Linen Manual Config.
             if bundle_id in seen_bundles:
                 continue
 
@@ -4683,14 +4616,12 @@ def page_linen_manual_topup():
 
             if not bundle:
                 st.error(
-                    f"Bundle '{bundle_id}' is configured for "
-                    f"this location but is not defined in "
-                    f"Linen Bundle Mapping."
+                    f"Bundle '{bundle_id}' is configured for this location "
+                    "but is not defined in Linen Bundle Mapping."
                 )
                 return
 
             seen_bundles.add(bundle_id)
-
             display_rows.append({
                 "type": "BUNDLE",
                 "bundle_id": bundle_id,
@@ -4700,18 +4631,13 @@ def page_linen_manual_topup():
             })
 
         common_rows = [
-            row
-            for row in display_rows
-            if str(
-                row.get("classification") or ""
-            ).upper() == "COMMON"
+            row for row in display_rows
+            if str(row.get("classification") or "").upper() == "COMMON"
         ]
+
         uncommon_rows = [
-            row
-            for row in display_rows
-            if str(
-                row.get("classification") or ""
-            ).upper() == "UNCOMMON"
+            row for row in display_rows
+            if str(row.get("classification") or "").upper() == "UNCOMMON"
         ]
 
         def render_manual_topup_rows(title, rows):
@@ -4723,18 +4649,17 @@ def page_linen_manual_topup():
             for row in rows:
                 norm = row.get("norm")
                 label = row["name"]
+
                 if norm is not None:
                     label = f"{label} (Norm: {norm})"
 
                 if row["type"] == "ITEM":
                     widget_key = (
-                        f"manual_topup_{active_location_id}_"
-                        f"item_{row['item_no']}"
+                        f"manual_topup_{active_location_id}_item_{row['item_no']}"
                     )
                 else:
                     widget_key = (
-                        f"manual_topup_{active_location_id}_"
-                        f"bundle_{row['bundle_id']}"
+                        f"manual_topup_{active_location_id}_bundle_{row['bundle_id']}"
                     )
 
                 qty = st.number_input(
@@ -4751,105 +4676,72 @@ def page_linen_manual_topup():
                     "widget_key": widget_key,
                 })
 
-            render_manual_topup_rows(
-                "Common Items",
-                common_rows
-            )
-            render_manual_topup_rows(
-                "Uncommon Items",
-                uncommon_rows
-            )
+        render_manual_topup_rows("Common Items", common_rows)
+        render_manual_topup_rows("Uncommon Items", uncommon_rows)
 
-            if st.button(
-                "Submit Top Up",
-                use_container_width=True,
-                key=(
-                    "submit_manual_topup_config_"
-                    f"{active_location_id}"
-                )
-            ):
-                try:
-                    final_qty = {}
+        if st.button(
+            "Submit Top Up",
+            use_container_width=True,
+            key=f"submit_manual_topup_config_{active_location_id}"
+        ):
+            try:
+                final_qty = {}
 
-                    for entered in entered_values:
-                        entered_qty = int(
-                            entered.get("quantity") or 0
-                        )
+                for entered in entered_values:
+                    entered_qty = int(entered.get("quantity") or 0)
 
-                        if entered_qty <= 0:
-                            continue
+                    if entered_qty <= 0:
+                        continue
 
-                        if entered["type"] == "ITEM":
-                            item_no = str(entered["item_no"])
+                    if entered["type"] == "ITEM":
+                        item_no = str(entered["item_no"])
+                        final_qty[item_no] = final_qty.get(item_no, 0) + entered_qty
+
+                    else:
+                        bundle_id = entered["bundle_id"]
+                        bundle = bundle_map.get(bundle_id)
+
+                        if not bundle:
+                            raise ValueError(
+                                f"Bundle '{bundle_id}' is not defined."
+                            )
+
+                        for component in bundle["components"]:
+                            item_no = str(component["item_no"])
+                            multiplier = int(component["qty_per_set"])
                             final_qty[item_no] = (
                                 final_qty.get(item_no, 0)
-                                + entered_qty
+                                + entered_qty * multiplier
                             )
-                            
-                        else:
-                            bundle_id = entered["bundle_id"]
-                            bundle = bundle_map.get(bundle_id)
 
-                            if not bundle:
-                                raise ValueError(
-                                    f"Bundle '{bundle_id}' is not defined."
-                                )
+                topup_lines = [
+                    {
+                        "item_no": item_no,
+                        "quantity": qty,
+                    }
+                    for item_no, qty in final_qty.items()
+                    if qty > 0
+                ]
 
-                            for component in bundle["components"]:
-                                item_no = str(
-                                    component["item_no"]
-                                )
-                                multiplier = int(
-                                    component["qty_per_set"]
-                                )
-                                final_qty[item_no] = (
-                                    final_qty.get(item_no, 0)
-                                    + entered_qty * multiplier
-                                )
+                create_manual_topup(
+                    location_id=active_location_id,
+                    created_by=user["username"],
+                    lines=topup_lines,
+                )
 
-                    topup_lines = [
-                        {
-                            "item_no": item_no,
-                            "quantity": qty,
-                        }
-                        for item_no, qty in final_qty.items()
-                        if qty > 0
-                    ]
+                for entered in entered_values:
+                    st.session_state.pop(entered["widget_key"], None)
 
-                    create_manual_topup(
-                        location_id=active_location_id,
-                        created_by=user["username"],
-                        lines=topup_lines,
-                    )
+                st.session_state.pop("manual_topup_location_id", None)
+                st.session_state["manual_topup_scan_nonce"] += 1
+                st.session_state["manual_topup_success"] = True
+                st.rerun()
 
-                    for entered in entered_values:
-                        st.session_state.pop(
-                            entered["widget_key"],
-                            None
-                        )
+            except ValueError as e:
+                st.warning(str(e))
+            except Exception as e:
+                st.error(f"Could not save Manual Top Up: {e}")
 
-                    st.session_state.pop(
-                        "manual_topup_location_id",
-                        None
-                    )
-                    st.session_state[
-                        "manual_topup_scan_nonce"
-                    ] += 1
-                    st.session_state[
-                        "manual_topup_success"
-                    ] = True
-                    st.rerun()
-
-                except ValueError as e:
-                    st.warning(str(e))
-                except Exception as e:
-                    st.error(
-                        f"Could not save Manual Top Up: {e}"
-                    )
-
-    # =========================================================
-    # Scan another / Back — common to both branches
-    # =========================================================
     st.divider()
 
     if st.button(
@@ -4863,13 +4755,8 @@ def page_linen_manual_topup():
                 None
             )
 
-        st.session_state.pop(
-            "manual_topup_location_id",
-            None
-        )
-        st.session_state[
-            "manual_topup_scan_nonce"
-        ] += 1
+        st.session_state.pop("manual_topup_location_id", None)
+        st.session_state["manual_topup_scan_nonce"] += 1
         st.rerun()
 
     if st.button(
@@ -4877,10 +4764,7 @@ def page_linen_manual_topup():
         use_container_width=True,
         key="manual_topup_back"
     ):
-        st.session_state.pop(
-            "manual_topup_location_id",
-            None
-        )
+        st.session_state.pop("manual_topup_location_id", None)
         st.session_state["page"] = "home"
         st.rerun()
 
