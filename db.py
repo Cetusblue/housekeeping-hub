@@ -383,6 +383,20 @@ def init_db_postgres():
     )
     """)
 
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS linen_submission_bundle_lines (
+        id SERIAL PRIMARY KEY,
+        submission_id INTEGER NOT NULL REFERENCES linen_submissions(id),
+        bundle_id TEXT NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 0
+    )
+    """)
+
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_linen_submission_bundle_lines_submission
+    ON linen_submission_bundle_lines(submission_id)
+    """)
+
     # ---------------------------
     # Linen Manual Top Up
     # ---------------------------

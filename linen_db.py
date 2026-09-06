@@ -331,8 +331,10 @@ def save_submission_draft(
             bundle_line.get("quantity") or 0
         )
 
-        if qty <= 0:
-            continue
+        if qty < 0:
+            raise ValueError(
+                "Bundle quantity cannot be negative."
+            )
 
         cur.execute("""
             INSERT INTO linen_submission_bundle_lines (
