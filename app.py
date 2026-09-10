@@ -383,7 +383,7 @@ def page_home():
             st.session_state["page"] = "linen_manage"
             st.rerun()
 
-    if role == "LINSUP":
+    if role in ("LINSUP", "LINTEAM"):
         if st.button(
             "Manual Top Up Report",
             use_container_width=True
@@ -4829,7 +4829,7 @@ def page_linen_topup_report():
     require_login()
     user = st.session_state["user"]
 
-    if user["role"] != "LINSUP":
+    if user["role"] not in ("LINSUP", "LINTEAM"):
         st.error("Access denied.")
         return
 
