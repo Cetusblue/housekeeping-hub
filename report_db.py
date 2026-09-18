@@ -63,6 +63,89 @@ def get_order_bucket(team_code: str, template_day: str):
     return None
 
 
+
+# ---------------------------
+# H1/H2 Report Line Master helpers
+# ---------------------------
+def _load_half_year_report_lines():
+    """Reads active H1/H2 lines and exact conversion factors from Report Line Master."""
+    wb = load_workbook(MASTER_FILE, data_only=True)
+    ws = wb["Report Line Master"]
+    headers = [str(c.value or "").strip() for c in ws[1]]
+    idx = {name: headers.index(name) for name in headers}
+
+    required = [
+        "report_line_id", "for_column_b", "report_line_name", "report_uom",
+        "for_column_e", "for_column_f", "display_line_order",
+        "active", "conversion_factor",
+    ]
+    for col in required:
+        if col not in idx:
+            raise ValueError(f"Missing required column in Report Line Master: {col}")
+
+    rows = []
+    for values in ws.iter_rows(min_row=2, values_only=True):
+        line_id = str(values[idx["report_line_id"]] or "").strip()
+        line_name = str(values[idx["report_line_name"]] or "").strip()
+        if not line_id and not line_name:
+            continue
+
+        active = str(values[idx["active"]] or "").strip().upper()
+        if active not in ("Y", "YES", "TRUE", "1"):
+            continue
+
+        raw = values[idx["conversion_factor"]]
+        try:
+            factor = Fraction(str(raw if raw not in (None, "") else "1").strip())
+        except Exception as exc:
+            raise ValueError(
+                f"Invalid conversion_factor for Report Line '{line_name}': {raw}"
+            ) from exc
+
+        rows.append({
+            "report_line_id": line_id,
+            "for_column_b": str(values[idx["for_column_b"]] or "").strip(),
+            "report_line_name": line_name,
+            "report_uom": str(values[idx["report_uom"]] or "").strip(),
+            "for_column_e": str(values[idx["for_column_e"]] or "").strip(),
+            "for_column_f": values[idx["for_column_f"]],
+            "display_line_order": int(values[idx["display_line_order"]]),
+            "conversion_factor": factor,
+        })
+
+    rows.sort(key=lambda r: r["display_line_order"])
+    return rows
+
+
+def _load_half_year_item_to_line_id(active_report_lines):
+    """Maps operational items only to active H1/H2 report lines."""
+    active_name_to_id = {
+        r["report_line_name"]: r["report_line_id"]
+        for r in active_report_lines
+    }
+
+    wb = load_workbook(MASTER_FILE, data_only=True)
+    ws = wb["Report Mapping"]
+    headers = [str(c.value or "").strip() for c in ws[1]]
+    idx = {name: headers.index(name) for name in headers}
+
+    mapping = {}
+    for values in ws.iter_rows(min_row=2, values_only=True):
+        item_name = str(values[idx["item_name"]] or "").strip()
+        line_name = str(values[idx["report_line_name"]] or "").strip()
+        if item_name and line_name in active_name_to_id:
+            mapping[item_name] = active_name_to_id[line_name]
+    return mapping
+
+
+def _report_fraction_to_value(value):
+    if not isinstance(value, Fraction):
+        value = Fraction(value)
+    if value.denominator == 1:
+        return int(value.numerator)
+    return float(value)
+
+
 # ---------------------------
 # Main report builder
 # ---------------------------
@@ -122,7 +205,8 @@ def get_half_year_report_data(year: int, period_code: str):
         if month in months:
             filtered_rows.append(dict(row))
 
-    report_lines = get_report_lines()
+    report_lines = _load_half_year_report_lines()
+    item_to_report_line_id = _load_half_year_item_to_line_id(report_lines)
 
     bucket_names = ["Tower A", "Tower B", "Tower C", "ANX Blk", "Others", "Tower ABC"]
 
@@ -132,7 +216,7 @@ def get_half_year_report_data(year: int, period_code: str):
         bucket_monthly_totals[bucket] = {}
         for line in report_lines:
             rid = line["report_line_id"]
-            bucket_monthly_totals[bucket][rid] = {m: 0 for m in months}
+            bucket_monthly_totals[bucket][rid] = {m: Fraction(0, 1) for m in months}
 
     # Fill tower-specific buckets
     for row in filtered_rows:
@@ -141,7 +225,7 @@ def get_half_year_report_data(year: int, period_code: str):
         month = int(row["created_at"][5:7])
         source_type = row["source_type"]
 
-        report_line_id = get_report_line_id_for_item(item_name)
+        report_line_id = item_to_report_line_id.get(item_name)
         if not report_line_id:
             continue
 
@@ -163,6 +247,19 @@ def get_half_year_report_data(year: int, period_code: str):
             continue
 
         bucket_monthly_totals[bucket][report_line_id][month] += qty
+
+    # Apply each report line's contractual/reporting conversion factor.
+    factor_by_line_id = {
+        line["report_line_id"]: line["conversion_factor"]
+        for line in report_lines
+    }
+
+    for bucket in ("Tower A", "Tower B", "Tower C", "ANX Blk", "Others"):
+        for line in report_lines:
+            rid = line["report_line_id"]
+            factor = factor_by_line_id[rid]
+            for month in months:
+                bucket_monthly_totals[bucket][rid][month] *= factor
 
     # Build Tower ABC as sum of A + B + C + ANX Blk
     # (Others is intentionally NOT included in Tower ABC)
@@ -190,7 +287,7 @@ def get_half_year_report_data(year: int, period_code: str):
                 "report_uom": line["report_uom"],             # D
                 "for_column_e": line["for_column_e"],         # E
                 "for_column_f": line["for_column_f"],         # F
-                "monthly_qty": bucket_monthly_totals[bucket][rid],  # G:L
+                "monthly_qty": {m: _report_fraction_to_value(v) for m, v in bucket_monthly_totals[bucket][rid].items()},  # G:L
             })
 
     return result
