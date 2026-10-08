@@ -83,6 +83,7 @@ from orders_db import (
 from linen_db import (
     create_linen_cycle,
     get_linen_cycles,
+    get_cycle_location_ids,
     get_linen_cycle,
     get_cycle_reps,
     save_cycle_reps,
@@ -3113,7 +3114,8 @@ def page_linen_manage():
             else:
                 create_linen_cycle(
                     cycle_name.strip(),
-                    user["username"]
+                    user["username"],
+                    [row["location_id"] for row in load_linen_locations_rows()]
                 )
                 st.success("Inventory created.")
                 st.rerun()
@@ -3492,14 +3494,15 @@ def page_linen_cycle_detail():
 
     locations = load_linen_locations_rows()
 
-    total_locations = len(locations)
+    cycle_location_ids = get_cycle_location_ids(cycle_id)
+    total_locations = len(cycle_location_ids)
     assigned_location_ids = {
         row["location_id"]
         for row in saved_assignments
     }
 
     assigned_locations = len(assigned_location_ids)
-    remaining_locations = total_locations - assigned_locations
+    remaining_locations = max(0, total_locations - assigned_locations)
 
     c1, c2, c3 = st.columns(3)
 
@@ -3595,10 +3598,7 @@ def page_linen_cycle_detail():
         cycle_id
     )
 
-    pending_count = (
-        total_locations
-        - completed_locations
-    )
+    pending_count = max(0, total_locations - completed_locations)
 
     c1, c2, c3 = st.columns(3)
 
@@ -3607,7 +3607,7 @@ def page_linen_cycle_detail():
     c3.metric("Pending", pending_count)
 
     if total_locations > 0:
-        progress_value = completed_locations / total_locations
+        progress_value = min(1.0, completed_locations / total_locations)
         if completed_locations >= total_locations:
             progress_icon = "🟢"
         elif completed_locations > 0:

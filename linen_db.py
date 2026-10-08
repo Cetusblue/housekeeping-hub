@@ -1,9 +1,7 @@
 from db import get_conn
 
-from db import get_conn
 
-
-def create_linen_cycle(cycle_name, created_by):
+def create_linen_cycle(cycle_name, created_by, location_ids):
     conn = get_conn()
     cur = conn.cursor()
 
@@ -18,10 +16,30 @@ def create_linen_cycle(cycle_name, created_by):
             'DRAFT',
             %s
         )
+        RETURNING id
     """, (cycle_name, created_by))
+
+    # Read the ID returned by this INSERT, not a separate lookup.
+
+    cycle_id = cur.fetchone()["id"]
+    for location_id in dict.fromkeys(location_ids):
+        cur.execute("""
+            INSERT INTO linen_cycle_locations (cycle_id, location_id)
+            VALUES (%s, %s)
+            ON CONFLICT DO NOTHING
+        """, (cycle_id, location_id))
 
     conn.commit()
     conn.close()
+
+
+def get_cycle_location_ids(cycle_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT location_id FROM linen_cycle_locations WHERE cycle_id = %s", (cycle_id,))
+    result = {row["location_id"] for row in cur.fetchall()}
+    conn.close()
+    return result
 
 
 def get_linen_cycles():
