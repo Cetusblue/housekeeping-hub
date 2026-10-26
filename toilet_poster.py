@@ -24,6 +24,8 @@ def _center(draw, xy, text, font, fill, spacing=4):
 def parse_qr_zip(data):
     """Return {toilet_id: (QR PIL image, original URL)}; require paired PNG/TXT."""
     found = {}
+    # Filename alias for the legacy QR exported under a slash-containing toilet ID.
+    aliases = {'4-HA': 'B-9-3/4-HA'}
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         for name in z.namelist():
             if not name.lower().endswith('.txt') or '/' in name or '\\' in name:
@@ -36,7 +38,7 @@ def parse_qr_zip(data):
             if '?toilet_qr=' not in url or not url.startswith(('https://', 'http://')):
                 continue
             im = Image.open(io.BytesIO(z.read(png_name))).convert('RGB')
-            found[key] = (im, url)
+            found[aliases.get(key, key)] = (im, url)
     return found
 
 def make_page(master, qr, toilet):
