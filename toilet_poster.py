@@ -50,10 +50,7 @@ def make_page(master, qr, toilet):
     # Preserve quiet zone and avoid interpolation artifacts in QR modules.
     qr.thumbnail((254, 254), Image.Resampling.NEAREST)
     im.paste(qr, (int(313-qr.width/2), int(421-qr.height/2)))
-    # Replace step 2 wording with the approved multi-select language.
-    # Keep the master artwork background intact; only overlay the new wording.
-    _center(d, (318, 724), '2. SELECT', _font(FONT_BOLD, 18), navy)
-    _center(d, (318, 746), 'ISSUES', _font(FONT_BOLD, 18), navy)
+    # Step 2 wording is already part of the master artwork.
     # Footer navy rectangle: replace the sample location lettering only.
     d.rectangle((169, 792, 580, 873), fill='#103c5b')
     # Display the complete Toilet Master name, with width-aware wrapping.
