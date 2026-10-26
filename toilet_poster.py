@@ -56,18 +56,39 @@ def make_page(master, qr, toilet):
     _center(d, (318, 746), 'ISSUES', _font(FONT_BOLD, 18), navy)
     # Footer navy rectangle: replace the sample location lettering only.
     d.rectangle((169, 792, 580, 873), fill='#103c5b')
-    tower = str(toilet.get('tower') or '').strip()
-    level = str(toilet.get('level') or '').strip()
-    typ = str(toilet.get('toilet_type') or toilet.get('type') or '').strip()
-    name = str(toilet.get('toilet_name') or toilet.get('name') or '').strip()
-    heading = f'TOWER {tower} · LEVEL {level}' if tower and level else (name or str(toilet.get('toilet_id', '')))
-    subtitle = f'{typ.upper()} TOILET' if typ and 'toilet' not in typ.lower() else typ.upper()
-    if not subtitle:
-        subtitle = name.upper() if name.upper() != heading.upper() else str(toilet.get('toilet_id', '')).upper()
-    if len(heading) > 29: heading = heading[:28] + '…'
-    if len(subtitle) > 38: subtitle = subtitle[:37] + '…'
-    d.text((181, 803), heading, font=_font(FONT_BOLD, 22 if len(heading)<24 else 17), fill='white')
-    d.text((181, 839), subtitle, font=_font(FONT_REG, 17 if len(subtitle)<30 else 14), fill='white')
+    # Display the complete Toilet Master name, with width-aware wrapping.
+    name = str(toilet.get('toilet_name') or toilet.get('name') or toilet.get('toilet_id') or '').strip().upper()
+    max_width = 385  # Available space to the right of the location pin.
+    max_lines = 3
+
+    def wrap_to_width(text, font):
+        lines = []
+        current = ''
+        for word in text.split():
+            candidate = f'{current} {word}'.strip()
+            if current and d.textbbox((0, 0), candidate, font=font)[2] > max_width:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+        return lines
+
+    for size in (20, 19, 18, 17, 16, 15, 14, 13):
+        font = _font(FONT_BOLD, size)
+        lines = wrap_to_width(name, font)
+        if len(lines) <= max_lines and all(
+            d.textbbox((0, 0), line, font=font)[2] <= max_width for line in lines
+        ):
+            break
+    else:
+        raise ValueError(f'Toilet name too long for poster: {name}')
+
+    line_height = size + 5
+    first_y = 833 - (len(lines) * line_height) / 2
+    for index, line in enumerate(lines):
+        d.text((181, round(first_y + index * line_height)), line, font=font, fill='white')
     return im
 
 def build_pdf(qr_items, toilet_rows, selected=None):

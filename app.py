@@ -83,7 +83,6 @@ from orders_db import (
 from linen_db import (
     create_linen_cycle,
     get_linen_cycles,
-    get_cycle_location_ids,
     get_linen_cycle,
     get_cycle_reps,
     save_cycle_reps,
@@ -123,8 +122,6 @@ from linen_topup_report import (
 )
 
 from streamlit_qrcode_scanner import qrcode_scanner
-
-from toilet_qr import public_page as toilet_public_page, admin_page as toilet_admin_page
 
 st.set_page_config(page_title="Ops Hub", layout="centered")
 
@@ -273,6 +270,9 @@ def page_login():
     st.markdown("""
     ### Announcements
 
+    26/10/2026
+    - Toilet Request QR System is now live
+
     6/9/2026
     - Linen Manual Top Up: Items now categorized by COMMON & UNCOMMON
     - New locations added for Linen Manual Top Up & Linen Inventory
@@ -359,10 +359,6 @@ def page_home():
             st.rerun()
 
         if role == "ADMIN":
-            if st.button("Toilet Requests", use_container_width=True):
-                st.session_state["page"] = "toilet_requests"
-                st.rerun()
-
             if st.button("System Tools", use_container_width=True):
                 st.session_state["page"] = "system_tools"
                 st.rerun()
@@ -3120,8 +3116,7 @@ def page_linen_manage():
             else:
                 create_linen_cycle(
                     cycle_name.strip(),
-                    user["username"],
-                    [row["location_id"] for row in load_linen_locations_rows()]
+                    user["username"]
                 )
                 st.success("Inventory created.")
                 st.rerun()
@@ -3500,15 +3495,14 @@ def page_linen_cycle_detail():
 
     locations = load_linen_locations_rows()
 
-    cycle_location_ids = get_cycle_location_ids(cycle_id)
-    total_locations = len(cycle_location_ids)
+    total_locations = len(locations)
     assigned_location_ids = {
         row["location_id"]
         for row in saved_assignments
     }
 
     assigned_locations = len(assigned_location_ids)
-    remaining_locations = max(0, total_locations - assigned_locations)
+    remaining_locations = total_locations - assigned_locations
 
     c1, c2, c3 = st.columns(3)
 
@@ -3604,7 +3598,10 @@ def page_linen_cycle_detail():
         cycle_id
     )
 
-    pending_count = max(0, total_locations - completed_locations)
+    pending_count = (
+        total_locations
+        - completed_locations
+    )
 
     c1, c2, c3 = st.columns(3)
 
@@ -3613,7 +3610,7 @@ def page_linen_cycle_detail():
     c3.metric("Pending", pending_count)
 
     if total_locations > 0:
-        progress_value = min(1.0, completed_locations / total_locations)
+        progress_value = completed_locations / total_locations
         if completed_locations >= total_locations:
             progress_icon = "🟢"
         elif completed_locations > 0:
@@ -5343,8 +5340,6 @@ def router():
         page_stock_card()
     elif page == "system_tools":
         page_system_tools()
-    elif page == "toilet_requests":
-        toilet_admin_page()
     elif page == "glo_gel_audits":
         page_glo_gel_audits()
     elif page == "glo_gel_audit_detail":
@@ -5375,10 +5370,6 @@ def router():
 # ---------------------------
 def main():
     ensure_bootstrap()
-    qr_token = st.query_params.get("toilet_qr", "")
-    if qr_token:
-        toilet_public_page(str(qr_token))
-        return
     restore_persistent_login()
     router()
 
