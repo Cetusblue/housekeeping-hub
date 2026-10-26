@@ -51,7 +51,7 @@ def make_page(master, qr, toilet):
     qr.thumbnail((254, 254), Image.Resampling.NEAREST)
     im.paste(qr, (int(313-qr.width/2), int(421-qr.height/2)))
     # Replace step 2 wording with the approved multi-select language.
-    d.rectangle((242, 710, 398, 760), fill='white')
+    # Keep the master artwork background intact; only overlay the new wording.
     _center(d, (318, 724), '2. SELECT', _font(FONT_BOLD, 18), navy)
     _center(d, (318, 746), 'ISSUES', _font(FONT_BOLD, 18), navy)
     # Footer navy rectangle: replace the sample location lettering only.
