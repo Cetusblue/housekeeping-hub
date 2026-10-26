@@ -169,6 +169,27 @@ def init_db_sqlite():
     )
     """)
 
+    cur.execute("PRAGMA table_info(users)")
+    existing_columns = {row[1] for row in cur.fetchall()}
+    if "phone_number" not in existing_columns:
+        cur.execute("ALTER TABLE users ADD COLUMN phone_number TEXT")
+    if "toilet_notify" not in existing_columns:
+        cur.execute("ALTER TABLE users ADD COLUMN toilet_notify TEXT NOT NULL DEFAULT 'N'")
+    cur.execute("""CREATE TABLE IF NOT EXISTS toilet_requests (
+        request_id INTEGER PRIMARY KEY AUTOINCREMENT, toilet_id TEXT NOT NULL, toilet_name TEXT NOT NULL,
+        tower TEXT NOT NULL, level TEXT, request_type TEXT NOT NULL, details TEXT,
+        routed_team TEXT NOT NULL, created_at TEXT NOT NULL,
+        notification_status TEXT NOT NULL DEFAULT 'DISABLED')""")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_toilet_requests_created ON toilet_requests(created_at)")
+    cur.execute("""CREATE TABLE IF NOT EXISTS toilet_qr_tokens (
+        toilet_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, active INTEGER NOT NULL DEFAULT 1)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS toilet_notification_logs (
+        log_id INTEGER PRIMARY KEY AUTOINCREMENT, request_id INTEGER NOT NULL,
+        phone_number TEXT NOT NULL, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL)""")
+
+    conn.commit()
+    conn.close()
+
 def init_db_postgres():
     conn = get_conn()
     cur = conn.cursor()
@@ -461,6 +482,21 @@ def init_db_postgres():
         ADD COLUMN IF NOT EXISTS correction_reason TEXT
     """)
 
+
+    # Toilet QR request module
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS toilet_notify TEXT NOT NULL DEFAULT 'N'")
+    cur.execute("""CREATE TABLE IF NOT EXISTS toilet_requests (
+        request_id SERIAL PRIMARY KEY, toilet_id TEXT NOT NULL, toilet_name TEXT NOT NULL,
+        tower TEXT NOT NULL, level TEXT, request_type TEXT NOT NULL, details TEXT,
+        routed_team TEXT NOT NULL, created_at TIMESTAMP NOT NULL,
+        notification_status TEXT NOT NULL DEFAULT 'DISABLED')""")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_toilet_requests_created ON toilet_requests(created_at)")
+    cur.execute("""CREATE TABLE IF NOT EXISTS toilet_qr_tokens (
+        toilet_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, active BOOLEAN NOT NULL DEFAULT TRUE)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS toilet_notification_logs (
+        log_id SERIAL PRIMARY KEY, request_id INTEGER NOT NULL REFERENCES toilet_requests(request_id),
+        phone_number TEXT NOT NULL, status TEXT NOT NULL, error TEXT, created_at TIMESTAMP NOT NULL)""")
     conn.commit()
     conn.close()
 

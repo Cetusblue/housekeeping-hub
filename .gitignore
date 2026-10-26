@@ -1,0 +1,19 @@
+# Python temporary files
+__pycache__/
+*.pyc
+
+# Local databases
+*.db
+
+# Telegram onboarding
+.telegram_onboarding.offset
+
+# Environment variables and secrets
+.env
+.env.*
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Local test scripts
+test_whatsapp.py

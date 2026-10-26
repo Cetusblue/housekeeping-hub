@@ -68,6 +68,8 @@ def load_user_master_rows():
         role = _normalize_role(row[idx["Role"]])
         team_code = _normalize_text(row[idx["Group"]])
         active = _normalize_active(row[idx["Active"]])
+        phone_number = _normalize_text(row[idx["phone_number"]]) if "phone_number" in idx else ""
+        toilet_notify = _normalize_flag(row[idx["toilet_notify"]]) if "toilet_notify" in idx else "N"
 
         if not any([name, username, password, role, team_code]):
             continue
@@ -88,6 +90,8 @@ def load_user_master_rows():
             "role": role,
             "team_code": team_code,
             "active": active,
+            "phone_number": phone_number,
+            "toilet_notify": toilet_notify,
         })
 
     return rows
@@ -115,7 +119,9 @@ def sync_users_from_workbook():
                     password_hash = {ph()},
                     role = {ph()},
                     team_code = {ph()},
-                    active = {ph()}
+                    active = {ph()},
+                    phone_number = {ph()},
+                    toilet_notify = {ph()}
                     WHERE username = {ph()}
             """, (
                 u["display_name"],
@@ -123,6 +129,8 @@ def sync_users_from_workbook():
                 u["role"],
                 u["team_code"],
                 u["active"],
+                u["phone_number"],
+                u["toilet_notify"],
                 u["username"],
             ))
         else:
@@ -133,9 +141,9 @@ def sync_users_from_workbook():
                     password_hash,
                     role,
                     team_code,
-                    active
+                    active, phone_number, toilet_notify
                 )
-                VALUES ({ph()}, {ph()}, {ph()}, {ph()}, {ph()}, {ph()})
+                VALUES ({ph()}, {ph()}, {ph()}, {ph()}, {ph()}, {ph()}, {ph()}, {ph()})
             """, (
                 u["username"],
                 u["display_name"],
@@ -143,6 +151,8 @@ def sync_users_from_workbook():
                 u["role"],
                 u["team_code"],
                 u["active"],
+                u["phone_number"],
+                u["toilet_notify"],
             ))
 
     conn.commit()
@@ -1025,3 +1035,19 @@ def get_manual_bundle_ids_for_location(
         for row in load_linen_manual_bundle_rows()
         if row["location_id"] == location_id
     ]
+
+@st.cache_data(show_spinner=False)
+def load_toilet_request_rows():
+    wb = _open_workbook()
+    ws = wb["Toilet Request"]
+    headers = [_normalize_text(c.value) for c in ws[1]]
+    required = ("toilet_id", "tower", "level", "zone", "toilet_type", "toilet_name", "supervisor_group", "active")
+    if any(h not in headers for h in required):
+        raise ValueError("Toilet Request master missing columns")
+    idx = {h: headers.index(h) for h in headers}
+    result = []
+    for values in ws.iter_rows(min_row=2, values_only=True):
+        row = {h: _normalize_text(values[idx[h]]) for h in required}
+        if row["toilet_id"] and row["active"].upper() in ("Y", "YES", "TRUE", "1"):
+            result.append(row)
+    return result
