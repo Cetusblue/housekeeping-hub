@@ -123,6 +123,8 @@ from linen_topup_report import (
 
 from streamlit_qrcode_scanner import qrcode_scanner
 
+from toilet_qr import public_page as toilet_public_page, admin_page as toilet_admin_page
+
 st.set_page_config(page_title="Ops Hub", layout="centered")
 
 
@@ -359,6 +361,10 @@ def page_home():
             st.rerun()
 
         if role == "ADMIN":
+            if st.button("Toilet Requests", use_container_width=True):
+                st.session_state["page"] = "toilet_requests"
+                st.rerun()
+
             if st.button("System Tools", use_container_width=True):
                 st.session_state["page"] = "system_tools"
                 st.rerun()
@@ -5340,6 +5346,11 @@ def router():
         page_stock_card()
     elif page == "system_tools":
         page_system_tools()
+    elif page == "toilet_requests":
+        if st.session_state.get("user", {}).get("role") != "ADMIN":
+            st.error("Access denied.")
+        else:
+            toilet_admin_page()
     elif page == "glo_gel_audits":
         page_glo_gel_audits()
     elif page == "glo_gel_audit_detail":
@@ -5370,6 +5381,10 @@ def router():
 # ---------------------------
 def main():
     ensure_bootstrap()
+    qr_token = st.query_params.get("toilet_qr", "")
+    if qr_token:
+        toilet_public_page(str(qr_token))
+        return
     restore_persistent_login()
     router()
 
