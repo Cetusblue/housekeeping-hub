@@ -6,6 +6,7 @@ import secrets
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import qrcode
+import os
 import streamlit as st
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
@@ -479,7 +480,7 @@ def admin_page():
     st.divider()
     st.subheader('Generate QR codes')
     st.warning('QR tokens are shown only when first generated. Save the ZIP immediately; do not share it publicly.')
-    default_url = st.secrets.get('PUBLIC_APP_URL', '') or ''
+    default_url = os.environ.get("PUBLIC_APP_URL", "")
     base = st.text_input(
         'Base URL for new QR codes',
         value=default_url,
