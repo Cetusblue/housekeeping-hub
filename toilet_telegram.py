@@ -1,9 +1,10 @@
 """Telegram notification delivery for OPS HUB toilet requests.
 
-Token is read from Streamlit secrets. Recipient selection uses toilet_routing.py; Demo-zone toilets route to
+Token is read from environment variables or Streamlit secrets. Recipient selection uses toilet_routing.py; Demo-zone toilets route to
 their assigned User Master group regardless of shift.
 """
 import json
+import os
 from urllib import request, parse, error
 import streamlit as st
 from master_loader import _open_workbook
@@ -11,6 +12,10 @@ from toilet_routing import select_recipients
 
 
 def setting(key, default=''):
+    """Prefer deployment environment variables, fall back to Streamlit secrets."""
+    value = os.environ.get(key)
+    if value is not None:
+        return str(value).strip()
     try:
         return str(st.secrets.get(key, default) or default).strip()
     except Exception:
