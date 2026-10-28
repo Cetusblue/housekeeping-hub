@@ -84,6 +84,7 @@ from linen_db import (
     create_linen_cycle,
     get_linen_cycles,
     get_linen_cycle,
+    get_cycle_location_ids,
     get_cycle_reps,
     save_cycle_reps,
     get_cycle_assignments,
@@ -3511,7 +3512,19 @@ def page_linen_cycle_detail():
 
     locations = load_linen_locations_rows()
 
-    total_locations = len(locations)
+    # Inventory scope is frozen when the cycle is created, not the live master.
+    cycle_location_ids = get_cycle_location_ids(cycle_id)
+    if not cycle_location_ids:
+        st.error(
+            "This inventory has no saved location snapshot. "
+            "Its original location list must be restored before progress can be calculated reliably."
+        )
+        st.stop()
+    locations = [
+        loc for loc in locations
+        if str(loc["location_id"]) in {str(i) for i in cycle_location_ids}
+    ]
+    total_locations = len(cycle_location_ids)
     assigned_location_ids = {
         row["location_id"]
         for row in saved_assignments
