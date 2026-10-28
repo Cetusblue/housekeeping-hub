@@ -3120,9 +3120,19 @@ def page_linen_manage():
             if not cycle_name.strip():
                 st.warning("Please enter an inventory name.")
             else:
+                # Snapshot the current master-list locations for this cycle.
+                location_ids = list(dict.fromkeys(
+                    row["location_id"]
+                    for row in load_linen_locations_rows()
+                    if row.get("location_id")
+                ))
+                if not location_ids:
+                    st.error("No linen locations found. Inventory was not created.")
+                    st.stop()
                 create_linen_cycle(
                     cycle_name.strip(),
-                    user["username"]
+                    user["username"],
+                    location_ids
                 )
                 st.success("Inventory created.")
                 st.rerun()
