@@ -7,8 +7,14 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from master_loader import load_linen_locations_rows, load_linen_master_rows, get_linen_bundle_map
 from linen_call_db import create_call, list_calls, get_call, delete_call
 
-# Four priority sets; other pyjama sizes remain available as individual items.
-PRIORITY_SETS = ('PYJ_F_M','PYJ_F_L','PYJ_M_M','PYJ_M_L')
+# Operational shortlist: order is intentional.
+PRIORITY_SETS = ('PYJ_F_5XL', 'PYJ_F_10XL', 'PYJ_M_5XL', 'PYJ_M_10XL')
+PRIORITY_ITEMS = ('BLANKET FLANNEL FS', 'DRAW SHEET FS', 'BATH TOWEL FS', 'FITTED BED SHEET FS')
+OTHER_SETS = ('PYJ_F_L', 'PYJ_F_XL', 'PYJ_M_L', 'PYJ_M_XL')
+OTHER_ITEMS = ('ORTHO PANT FS', 'URO PANT FS', 'PATIENT GOWN FS', 'SARONG FS',
+               'FEMALE KIMONO FS', 'MALE KIMONO FS', 'KIMONO FS',
+               'X RAY GOWN  M', 'X RAY GOWN  L', 'X RAY GOWN  3XL',
+               'TABLE SKIRTING FS')
 
 def _home():
     st.session_state['page']='home'
@@ -22,14 +28,27 @@ def _departments():
     return sorted(values)
 
 def _items():
-    result=[]
-    bundles=get_linen_bundle_map()
-    for bid in PRIORITY_SETS:
-        if bid in bundles:
-            result.append({'item_key':'B:'+bid,'item_name':bundles[bid]['bundle_name']})
-    for r in load_linen_master_rows():
-        result.append({'item_key':'I:'+str(r['item_no']),'item_name':r['item_name']})
-    return result
+    bundles = get_linen_bundle_map()
+    individual = {r['item_name'].upper().strip(): r for r in load_linen_master_rows()}
+    result = []
+
+    def add_set(bundle_id):
+        if bundle_id not in bundles:
+            raise ValueError(f'Linen Call Log bundle not found: {bundle_id}')
+        result.append({'item_key': 'B:' + bundle_id, 'item_name': bundles[bundle_id]['bundle_name']})
+
+    def add_item(name):
+        if name not in individual:
+            raise ValueError(f'Linen Call Log item not found: {name}')
+        row = individual[name]
+        result.append({'item_key': 'I:' + str(row['item_no']), 'item_name': row['item_name']})
+
+    for bid in PRIORITY_SETS: add_set(bid)
+    for name in PRIORITY_ITEMS: add_item(name)
+    priority_count = len(result)
+    for bid in OTHER_SETS: add_set(bid)
+    for name in OTHER_ITEMS: add_item(name)
+    return result, priority_count
 
 def _excel(month):
     wb=Workbook();ws=wb.active;ws.title='Linen Call Log'
@@ -60,12 +79,13 @@ def page_linen_call_log():
     labels=[f'{t} / {l} / {z or "—"}' for t,l,z in departments]
     with st.form('linen_call_entry',clear_on_submit=True):
         department=st.selectbox('Department (Tower / Level / Zone)',range(len(departments)),format_func=lambda i:labels[i])
-        st.subheader('Priority Pyjama Sets')
+        st.subheader('Priority Items')
         st.caption('Enter whole numbers. Zero delivered is allowed.')
         lines=[]
-        for index,item in enumerate(_items()):
-            if index==len([b for b in PRIORITY_SETS if b in get_linen_bundle_map()]):
-                st.subheader('Individual Linen Items')
+        items, priority_count = _items()
+        for index,item in enumerate(items):
+            if index == priority_count:
+                st.subheader('Other Linen Items')
             a,b,c=st.columns([4,1,1])
             with a:st.write(item['item_name'])
             with b:req=st.number_input('Request',min_value=0,step=1,key='lcr_'+item['item_key'],label_visibility='visible')
