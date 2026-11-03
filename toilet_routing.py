@@ -22,6 +22,9 @@ def select_recipients(toilet, when, users):
 
     if minute >= 21 * 60 + 1 or minute < 7 * 60:
         names = {'sangkele'}
+    elif tower == 'A' and when.weekday() == 6:
+        # Sunday, 07:00–21:00: all Tower A zones notify Myrna.
+        names = {'myrna'}
     elif tower == 'A' and minute >= 16 * 60 + 1:
         names = {'myrna'}
     elif tower == 'A' and group == 'AB2-B1':
