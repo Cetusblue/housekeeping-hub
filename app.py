@@ -125,6 +125,8 @@ from linen_topup_report import (
 from streamlit_qrcode_scanner import qrcode_scanner
 
 from toilet_qr import public_page as toilet_public_page, admin_page as toilet_admin_page
+from linen_call_db import init_linen_call_log
+from linen_call_page import page_linen_call_log
 
 st.set_page_config(page_title="Ops Hub", layout="centered")
 
@@ -138,6 +140,7 @@ def ensure_bootstrap():
     # not on every Streamlit widget rerun.
     init_db()
     seed_minimal_data()
+    init_linen_call_log()
     purge_old_manual_topups()
     return True
 
@@ -391,6 +394,11 @@ def page_home():
     if role == "LINSUP":
         if st.button("Initiate/ Manage Linen Inventory", use_container_width=True):
             st.session_state["page"] = "linen_manage"
+            st.rerun()
+
+    if role in ("LINSUP", "LINTEAM"):
+        if st.button("Linen Call Log", use_container_width=True):
+            st.session_state["page"] = "linen_call_log"
             st.rerun()
 
     if role in ("LINSUP", "LINTEAM"):
@@ -5386,6 +5394,8 @@ def router():
         page_linen_count()
     elif page == "linen_manage":
         page_linen_manage()
+    elif page == "linen_call_log":
+        page_linen_call_log()
     elif page == "linen_manual_topup":
         page_linen_manual_topup()
     elif page == "linen_topup_report":
