@@ -3923,27 +3923,22 @@ def page_linen_count():
         )
 
     # =========================================================
-    # Determine which component items bundles replace
-    # =========================================================
-    bundled_component_item_nos = set()
-
+    # Bundles and individual components may both be counted at the
+    # same location. Saved component lines contain their combined total;
+    # subtract the previously saved pack contribution for the individual
+    # input to avoid counting the packs twice on reopening a draft.
+    saved_bundle_component_qty = {}
     if use_bundle_mode:
         for bundle_id in valid_bundle_ids:
-            bundle = bundle_map[bundle_id]
-
-            for component in bundle["components"]:
-                bundled_component_item_nos.add(
-                    str(component["item_no"])
+            bundle_qty = int(saved_bundle_qty_map.get(bundle_id, 0))
+            for component in bundle_map[bundle_id]["components"]:
+                item_no = str(component["item_no"])
+                saved_bundle_component_qty[item_no] = (
+                    saved_bundle_component_qty.get(item_no, 0)
+                    + bundle_qty * int(component["qty_per_set"])
                 )
 
-    # Anything not consumed by a bundle remains an ordinary
-    # Linen Inventory item.
-    singular_items = [
-        item
-        for item in items
-        if str(item["item_no"])
-        not in bundled_component_item_nos
-    ]
+    singular_items = items
 
     st.subheader("Items to Count")
 
@@ -4012,10 +4007,8 @@ def page_linen_count():
             min_value=0,
             step=1,
             value=int(
-                saved_qty_map.get(
-                    item_no,
-                    0
-                )
+                max(0, saved_qty_map.get(item_no, 0)
+                    - saved_bundle_component_qty.get(item_no, 0))
             ),
             disabled=not can_edit,
             key=(
@@ -4076,13 +4069,17 @@ def page_linen_count():
 
         # Save every bundled component as its actual Linen
         # Master item. Bundle names never enter the report data.
-        for item_no, quantity in (
-            expanded_component_qty.items()
-        ):
-            count_lines.append({
-                "item_no": item_no,
-                "quantity": int(quantity),
-            })
+        count_by_item = {
+            str(line["item_no"]): line for line in count_lines
+        }
+        for item_no, quantity in expanded_component_qty.items():
+            if item_no in count_by_item:
+                count_by_item[item_no]["quantity"] += int(quantity)
+            else:
+                count_lines.append({
+                    "item_no": item_no,
+                    "quantity": int(quantity),
+                })
 
     # =========================================================
     # Save / Submit
